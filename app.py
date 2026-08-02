@@ -54,10 +54,7 @@ meses_lista = [
 st.sidebar.markdown("---")
 st.sidebar.header("📅 Visualización de Meses")
 mes_seleccionado = st.sidebar.selectbox(
-    "Mes para Ventas (2025 vs 2026)", meses_lista, key="mes_trabajo"
-)
-mes_turno = st.sidebar.selectbox(
-    "Mes para Turnos 2026", meses_lista, key="mes_turno_trabajo"
+    "Seleccionar Mes a Visualizar", meses_lista, key="mes_trabajo"
 )
 
 
@@ -651,23 +648,27 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
 # MENÚ 2: VENTAS POR TURNOS (2026)
 # ==========================================
 elif menu_principal == "🌙 Ventas por Turnos":
-    st.subheader(f"🌙 Control de Ventas por Turnos - {mes_turno} (2026)")
+    st.subheader(
+        f"🌙 Control de Ventas por Turnos - {mes_seleccionado} (2026)"
+    )
 
     if st.sidebar.button("🔄 Recargar Turnos desde la Nube"):
-        st.session_state.turnos_2026.pop(mes_turno, None)
+        st.session_state.turnos_2026.pop(mes_seleccionado, None)
         st.rerun()
 
-    sheet_t_26 = f"turno{mes_turno.lower()}2026"
+    sheet_t_26 = f"turno{mes_seleccionado.lower()}2026"
 
     if (
-        mes_turno not in st.session_state.turnos_2026
-        or st.session_state.turnos_2026[mes_turno].empty
+        mes_seleccionado not in st.session_state.turnos_2026
+        or st.session_state.turnos_2026[mes_seleccionado].empty
     ):
         df_nube_t26 = cargar_desde_nube(sheet_t_26)
         if not df_nube_t26.empty:
-            st.session_state.turnos_2026[mes_turno] = df_nube_t26
+            st.session_state.turnos_2026[mes_seleccionado] = df_nube_t26
 
-    df_t_26 = st.session_state.turnos_2026.get(mes_turno, pd.DataFrame())
+    df_t_26 = st.session_state.turnos_2026.get(
+        mes_seleccionado, pd.DataFrame()
+    )
 
     if not df_t_26.empty:
         df_procesado_2026 = (
@@ -740,15 +741,17 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
         st.markdown("---")
         st.download_button(
-            label=f"📥 Descargar Reporte de Turnos 2026 ({mes_turno})",
+            label=(
+                f"📥 Descargar Reporte de Turnos 2026 ({mes_seleccionado})"
+            ),
             data=output_t.getvalue(),
-            file_name=f"turnos_2026_{mes_turno}.xlsx",
+            file_name=f"turnos_2026_{mes_seleccionado}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
         st.info(
             f"No hay registros de ventas por turnos cargados para el mes de"
-            f" **{mes_turno}**. Sube tu archivo desde el panel lateral."
+            f" **{mes_seleccionado}**. Sube tu archivo desde el panel lateral."
         )
 
 
