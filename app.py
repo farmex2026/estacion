@@ -232,7 +232,7 @@ def procesar_df_turnos(df):
     lista_turnos = []
 
     for val in fechas_raw:
-        val_str = val.strip()
+        val_str = str(val).strip()
         turno = "DESCONOCIDO"
         if (
             "(1)" in val_str
