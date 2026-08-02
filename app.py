@@ -3,7 +3,6 @@ import os
 import re
 import pandas as pd
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(
     page_title="Gestión Integral de Estación", page_icon="⛽", layout="wide"
@@ -12,21 +11,15 @@ st.set_page_config(
 st.sidebar.markdown("---")
 st.sidebar.markdown("🛠️ **Creado por Lucas-Farmex 2026 (Online)**")
 
-# Conexión a Google Sheets en la nube (Gratis)
-# Esto lee y escribe directamente en tu Google Sheet
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-except Exception as e:
-    st.error(
-        f"Error al conectar con la base de datos en la nube: {e}. Asegúrate"
-        " de configurar los secretos."
-    )
-
 # Inicialización de Estados Globales estructurados por Mes
 if "datos_2026" not in st.session_state:
     st.session_state.datos_2026 = {}
 if "datos_2025" not in st.session_state:
     st.session_state.datos_2025 = {}
+if "turnos_2026" not in st.session_state:
+    st.session_state.turnos_2026 = {}
+if "turnos_2025" not in st.session_state:
+    st.session_state.turnos_2025 = {}
 
 menu_principal = st.sidebar.selectbox(
     "📂 Menú Principal",
@@ -129,21 +122,45 @@ def procesar_archivos_playa_detalle(archivos):
 
 
 # ----------------------------------------------------
-# SECCIÓN DE SINCRONIZACIÓN AUTOMÁTICA EN LA NUBE
+# SECCIÓN DE SINCRONIZACIÓN / BASE CONSOLIDADA (MULTI-PC)
 # ----------------------------------------------------
 st.sidebar.markdown("---")
-st.sidebar.header("☁️ Sincronización Nube")
+st.sidebar.header("🌐 Sincronización Multi-PC")
 
-if st.sidebar.button("💾 Guardar Cambios en la Nube"):
+archivo_maestro = st.sidebar.file_uploader(
+    "🔄 Subir Base Consolidada (.xlsx)",
+    type=["xlsx"],
+    key="uploader_maestro",
+)
+if archivo_maestro:
     try:
-        # Guardamos los datos de 2026 en la nube (ejemplo para el mes activo)
-        # Puedes expandir esto para guardar todos los meses que tengan datos
-        st.success(
-            "¡Datos guardados correctamente en Google Sheets! Ya se pueden ver"
-            " desde cualquier PC."
+        excel_file = pd.ExcelFile(archivo_maestro)
+        for sheet_name in excel_file.sheet_names:
+            df_sh = pd.read_excel(excel_file, sheet_name=sheet_name)
+            if sheet_name.startswith("2026_"):
+                mes_key = sheet_name.replace("2026_", "")
+                if mes_key in meses_lista:
+                    st.session_state.datos_2026[mes_key] = df_sh
+        st.sidebar.success(
+            "¡Base consolidada cargada con éxito en la nube!"
         )
     except Exception as e:
-        st.error(f"Error al guardar en la nube: {e}")
+        st.sidebar.error(f"Error al leer el archivo maestro: {e}")
+
+if st.sidebar.button("💾 Generar Respaldo Consolidado"):
+    output_master = io.BytesIO()
+    with pd.ExcelWriter(output_master, engine="openpyxl") as writer:
+        for mes, df in st.session_state.datos_2026.items():
+            if not df.empty:
+                df.to_excel(writer, sheet_name=f"2026_{mes}", index=False)
+
+    st.sidebar.download_button(
+        label="📥 Descargar Archivo Maestro (.xlsx)",
+        data=output_master.getvalue(),
+        file_name="base_consolidada_estacion.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="btn_descargar_maestro",
+    )
 
 
 if menu_principal == "Ventas 2026":
@@ -215,7 +232,7 @@ if menu_principal == "Ventas 2026":
             st.dataframe(df_detalle_display, use_container_width=True)
     else:
         st.info(
-            f"👈 Sube tus archivos Excel detallados de Ventas 2026 para **{mes_seleccionado}**."
+            f"👈 Sube tus archivos Excel detallados de Ventas 2026 para **{mes_seleccionado}** (o carga tu Base Consolidada arriba)."
         )
 
 elif menu_principal == "🌙 Turnos por Día":
