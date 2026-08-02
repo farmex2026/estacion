@@ -817,7 +817,7 @@ elif menu_principal == "🛒 Tienda Full":
                 .reset_index()
             )
 
-            # Resumen de Comidas (Comidas + Comidas elaboradas) y Bebidas Calientes
+            # Resumen de Comidas (Comidas + Comidas elaboradas) y Bebidas Calientes (Filtro flexible)
             st.subheader(
                 "🍔 Resumen de Unidades: Comidas y Bebidas Calientes"
             )
@@ -832,9 +832,13 @@ elif menu_principal == "🛒 Tienda Full":
                 else 0.0
             )
 
-            mask_bebidas_cal = df_rubros_sum["Rubro"].str.upper().str.contains(
-                "BEBIDA"
-            ) & df_rubros_sum["Rubro"].str.upper().str.contains("CALIENTE")
+            mask_bebidas_cal = (
+                df_rubros_sum["Rubro"].str.upper().str.contains("CALIENTE")
+                | df_rubros_sum["Rubro"].str.upper().str.contains("CAFE")
+                | df_rubros_sum["Rubro"].str.upper().str.contains("TÉ")
+                | df_rubros_sum["Rubro"].str.upper().str.contains("TE")
+                | df_rubros_sum["Rubro"].str.upper().str.contains("CAFETERIA")
+            )
             df_bebidas_cal_detalle = df_rubros_sum[mask_bebidas_cal]
             total_cant_bebidas_cal = (
                 df_bebidas_cal_detalle["Cantidad"].sum()
