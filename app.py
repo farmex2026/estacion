@@ -18,6 +18,8 @@ st.sidebar.markdown("---")
 st.sidebar.header("☁️ Nube Automática")
 st.sidebar.success("✅ Google Sheets Sincronizado")
 
+if "datos_2025" not in st.session_state:
+    st.session_state.datos_2025 = {}
 if "datos_2026" not in st.session_state:
     st.session_state.datos_2026 = {}
 if "turnos_2026" not in st.session_state:
@@ -29,7 +31,7 @@ if "boxes_2026" not in st.session_state:
 
 menu_principal = st.sidebar.selectbox(
     "📂 Menú Principal",
-    ["Ventas 2026", "🌙 Turnos por Día", "🛒 Tienda Full", "📦 BOXES"],
+    ["📊 Ventas (2025 vs 2026)", "🌙 Turnos por Día", "🛒 Tienda Full", "📦 BOXES"],
 )
 
 meses_lista = [
@@ -135,130 +137,179 @@ def procesar_generico(archivos):
     return pd.DataFrame()
 
 
+def cargar_desde_nube(mes, anio):
+    sheet_name = f"{mes} {anio}"
+    try:
+        resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=5)
+        data = resp.json()
+        if data and len(data) > 1:
+            headers = data[0]
+            rows = data[1:]
+            df = pd.DataFrame(rows, columns=headers)
+            if "Volumen" in df.columns:
+                df["Volumen"] = pd.to_numeric(
+                    df["Volumen"], errors="coerce"
+                ).fillna(0)
+            if "Monto" in df.columns:
+                df["Monto"] = pd.to_numeric(
+                    df["Monto"], errors="coerce"
+                ).fillna(0)
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+
 # ==========================================
-# MENÚ 1: VENTAS 2026 (PLAYA)
+# MENÚ 1: VENTAS (2025 vs 2026)
 # ==========================================
-if menu_principal == "Ventas 2026":
+if menu_principal == "📊 Ventas (2025 vs 2026)":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes a Ver")
     mes_seleccionado = st.sidebar.selectbox(
         "Mes de Trabajo", meses_lista, key="mes_trabajo"
     )
 
-    # DESCARGA AUTOMÁTICA DESDE GOOGLE SHEETS AL CAMBIAR DE MES
-    try:
-        resp = requests.get(f"{URL_NUBE}?month={mes_seleccionado}", timeout=5)
-        data = resp.json()
-        if data and len(data) > 1:
-            headers = data[0]
-            rows = data[1:]
-            df_recuperado = pd.DataFrame(rows, columns=headers)
-
-            if "Volumen" in df_recuperado.columns:
-                df_recuperado["Volumen"] = pd.to_numeric(
-                    df_recuperado["Volumen"], errors="coerce"
-                ).fillna(0)
-            if "Monto" in df_recuperado.columns:
-                df_recuperado["Monto"] = pd.to_numeric(
-                    df_recuperado["Monto"], errors="coerce"
-                ).fillna(0)
-
-            st.session_state.datos_2026[mes_seleccionado] = df_recuperado
-    except Exception:
-        pass
-
-    # PANEL EXCLUSIVO PARA EL ADMINISTRADOR (OCULTO PARA EMPLEADOS)
-    with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
-        st.markdown(
-            "*(Solo para cargar nuevos archivos a la nube del mes seleccionado)*"
+    # DESCARGA AUTOMÁTICA DESDE GOOGLE SHEETS PARA AMBOS AÑOS
+    if mes_seleccionado not in st.session_state.datos_2025:
+        st.session_state.datos_2025[mes_seleccionado] = cargar_desde_nube(
+            mes_seleccionado, 2025
         )
-        archivos_playa_26 = st.file_uploader(
-            f"Subir Excel - {mes_seleccionado}",
+    if mes_seleccionado not in st.session_state.datos_2026:
+        st.session_state.datos_2026[mes_seleccionado] = cargar_desde_nube(
+            mes_seleccionado, 2026
+        )
+
+    # PANEL EXCLUSIVO PARA EL ADMINISTRADOR (SUBIDA DE EXCEL 2025 / 2026)
+    with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
+        anio_upload = st.selectbox("Año del Archivo", [2026, 2025], index=0)
+        archivos_playa = st.file_uploader(
+            f"Subir Excel - {mes_seleccionado} {anio_upload}",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
-            key=f"uploader_playa_26_{mes_seleccionado}",
+            key=f"uploader_playa_{anio_upload}_{mes_seleccionado}",
         )
 
-        if archivos_playa_26:
-            df_detalle_26 = procesar_archivos_playa_detalle(archivos_playa_26)
-            if not df_detalle_26.empty:
-                st.session_state.datos_2026[mes_seleccionado] = df_detalle_26
+        if archivos_playa:
+            df_detalle_procesado = procesar_archivos_playa_detalle(
+                archivos_playa
+            )
+            if not df_detalle_procesado.empty:
+                if anio_upload == 2025:
+                    st.session_state.datos_2025[mes_seleccionado] = (
+                        df_detalle_procesado
+                    )
+                else:
+                    st.session_state.datos_2026[mes_seleccionado] = (
+                        df_detalle_procesado
+                    )
+
                 try:
+                    sheet_name = f"{mes_seleccionado} {anio_upload}"
                     payload = {
-                        "month": mes_seleccionado,
-                        "headers": df_detalle_26.columns.tolist(),
-                        "rows": df_detalle_26.astype(str).values.tolist(),
+                        "month": sheet_name,
+                        "headers": df_detalle_procesado.columns.tolist(),
+                        "rows": df_detalle_procesado.astype(
+                            str
+                        ).values.tolist(),
                     }
                     requests.post(URL_NUBE, json=payload, timeout=5)
-                    st.success("¡Subido y guardado en la nube con éxito!")
+                    st.success(
+                        f"¡Subido y guardado en la nube ({sheet_name}) con"
+                        " éxito!"
+                    )
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
 
-    df_2026_detalle = st.session_state.datos_2026.get(
-        mes_seleccionado, pd.DataFrame()
-    )
+    df_25 = st.session_state.datos_2025.get(mes_seleccionado, pd.DataFrame())
+    df_26 = st.session_state.datos_2026.get(mes_seleccionado, pd.DataFrame())
 
-    if not df_2026_detalle.empty:
-        st.subheader(f"📋 Detalle de Transacciones - {mes_seleccionado} 2026")
-
-        total_litros_26 = df_2026_detalle["Volumen"].sum()
-        total_despachos_26 = len(df_2026_detalle)
-
-        col_m1, col_m2 = st.columns(2)
-        col_m1.metric(
-            "Litros Vendidos Totales", fmt_litros(total_litros_26)
+    if not df_25.empty or not df_26.empty:
+        st.subheader(
+            f"📈 Comparativa de Ventas - {mes_seleccionado} (2025 vs 2026)"
         )
-        col_m2.metric(
-            "Cantidad de Despachos", fmt_entero(total_despachos_26)
+
+        litros_25 = df_25["Volumen"].sum() if not df_25.empty else 0.0
+        litros_26 = df_26["Volumen"].sum() if not df_26.empty else 0.0
+        diff_litros = litros_26 - litros_25
+        pct_litros = (
+            (diff_litros / litros_25 * 100) if litros_25 > 0 else 0.0
         )
+
+        desp_25 = len(df_25) if not df_25.empty else 0
+        desp_26 = len(df_26) if not df_26.empty else 0
+        diff_desp = desp_26 - desp_25
+        pct_desp = ((diff_desp / desp_25 * 100) if desp_25 > 0 else 0.0)
+
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.metric(
+                label=f"⛽ Litros Vendidos ({mes_seleccionado})",
+                value=f"2026: {fmt_litros(litros_26)}",
+                delta=(
+                    f"vs 2025 ({fmt_litros(litros_25)}) ->"
+                    f" {pct_litros:+.2f}%"
+                ),
+            )
+        with col_c2:
+            st.metric(
+                label=f"🧾 Cantidad de Despachos ({mes_seleccionado})",
+                value=f"2026: {fmt_entero(desp_26)}",
+                delta=f"vs 2025 ({fmt_entero(desp_25)}) -> {pct_desp:+.2f}%",
+            )
 
         st.markdown("---")
-        st.subheader("⛽ Análisis de Mix de Productos")
-
-        df_2026_detalle["Producto_Upper"] = (
-            df_2026_detalle["Producto"].astype(str).str.strip().str.upper()
-        )
-        df_mix_agrupado = (
-            df_2026_detalle.groupby("Producto_Upper")
-            .agg(
-                Litros=("Volumen", "sum"),
-                Despachos=("Volumen", "count"),
+        st.subheader("⛽ Análisis de Mix de Productos (2026)")
+        if not df_26.empty:
+            df_26["Producto_Upper"] = (
+                df_26["Producto"].astype(str).str.strip().str.upper()
             )
-            .reset_index()
-        )
+            df_mix_26 = (
+                df_26.groupby("Producto_Upper")
+                .agg(Litros=("Volumen", "sum"), Despachos=("Volumen", "count"))
+                .reset_index()
+            )
+            st.dataframe(
+                df_mix_26.style.format({
+                    "Litros": fmt_litros,
+                    "Despachos": fmt_entero,
+                }),
+                use_container_width=True,
+            )
+        else:
+            st.info(f"No hay datos de 2026 cargados para {mes_seleccionado}.")
 
-        st.dataframe(
-            df_mix_agrupado.style.format({
-                "Litros": fmt_litros,
-                "Despachos": fmt_entero,
-            }),
-            use_container_width=True,
-        )
+        with st.expander("🔍 Ver transacciones detalladas completas 2026"):
+            if not df_26.empty:
+                df_display = df_26.copy()
+                df_display.index = df_display.index + 1
+                st.dataframe(df_display, use_container_width=True)
+            else:
+                st.warning("No hay transacciones de 2026 para mostrar.")
 
-        with st.expander("🔍 Ver transacciones detalladas completas"):
-            df_display = df_2026_detalle.copy()
-            df_display.index = df_display.index + 1
-            st.dataframe(df_display, use_container_width=True)
-
+        # Opción de descarga
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df_2026_detalle.to_excel(
-                writer, sheet_name="Detalle Ventas", index=False
-            )
-            df_mix_agrupado.to_excel(
-                writer, sheet_name="Mix Productos", index=False
-            )
+            if not df_26.empty:
+                df_26.to_excel(
+                    writer, sheet_name="Detalle 2026", index=False
+                )
+            if not df_25.empty:
+                df_25.to_excel(
+                    writer, sheet_name="Detalle 2025", index=False
+                )
 
         st.markdown("---")
         st.download_button(
-            label=f"📥 Descargar Reporte Completo ({mes_seleccionado})",
+            label=f"📥 Descargar Reporte Comparativo ({mes_seleccionado})",
             data=output.getvalue(),
-            file_name=f"ventas_playa_{mes_seleccionado}_2026.xlsx",
+            file_name=f"comparativa_ventas_{mes_seleccionado}_2025_2026.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
         st.info(
-            f"No hay registros cargados todavía para el mes de **{mes_seleccionado}**."
+            f"No hay registros cargados ni para 2025 ni para 2026 en el mes de"
+            f" **{mes_seleccionado}**."
         )
 
 
