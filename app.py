@@ -695,13 +695,30 @@ elif menu_principal == "🌙 Ventas por Turnos":
         " vs 2026)"
     )
 
-    if not df_t_25.empty or not df_t_26.empty:
-        if df_t_25.empty:
-            st.info(
-                f"ℹ️ Mostrando datos de **2026**. No hay registros de turnos"
-                f" de **2025** para el mes de {mes_seleccionado_turno}."
+    # Indicadores de estado de carga
+    col_st1, col_st2 = st.columns(2)
+    with col_st1:
+        if not df_t_25.empty:
+            st.success(
+                f"✅ Turnos 2025 ({mes_seleccionado_turno}): Cargados"
+                f" ({fmt_entero(len(df_t_25))} registros)"
+            )
+        else:
+            st.warning(
+                f"⚠️ Turnos 2025 ({mes_seleccionado_turno}): Sin datos cargados"
+            )
+    with col_st2:
+        if not df_t_26.empty:
+            st.success(
+                f"✅ Turnos 2026 ({mes_seleccionado_turno}): Cargados"
+                f" ({fmt_entero(len(df_t_26))} registros)"
+            )
+        else:
+            st.warning(
+                f"⚠️ Turnos 2026 ({mes_seleccionado_turno}): Sin datos cargados"
             )
 
+    if not df_t_25.empty or not df_t_26.empty:
         total_litros_t25 = df_t_25["TOTAL"].sum() if not df_t_25.empty else 0.0
         total_litros_t26 = df_t_26["TOTAL"].sum() if not df_t_26.empty else 0.0
         diff_litros_t = total_litros_t26 - total_litros_t25
