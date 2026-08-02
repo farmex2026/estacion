@@ -298,7 +298,6 @@ def procesar_archivo_full_html(archivo):
             line.strip() for line in texto_plano.split("\n") if line.strip()
         ]
 
-        # Extraer datos clave
         cierre_nro = ""
         total_rendir = 0.0
         efectivo = 0.0
@@ -322,7 +321,6 @@ def procesar_archivo_full_html(archivo):
                 ):
                     capturando_rubros = False
                 else:
-                    # Parsear línea de rubro ej: "21-001 TIENDA RESIDUAL        44,0    17600,00"
                     match = re.match(
                         r"^([0-9\-]+)\s+(.+?)\s+([0-9\-\.,]+)\s+([0-9\-\.,]+)$",
                         linea,
@@ -353,7 +351,6 @@ def procesar_archivo_full_html(archivo):
                 if len(partes) > 1:
                     diferencia = limpiar_numerico(partes[1])
 
-        # Intentar extraer fecha del nombre del archivo o contenido
         fecha_str = archivo.name.replace(".htm", "").replace(".html", "")
 
         return {
@@ -799,7 +796,6 @@ elif menu_principal == "🛒 Tienda Full":
     sheet_f_25 = f"full_{mes_seleccionado_full.lower()}_2025"
     sheet_f_26 = f"full_{mes_seleccionado_full.lower()}_2026"
 
-    # Cargar de nube si está vacío
     if (
         mes_seleccionado_full not in st.session_state.full_2025
         or st.session_state.full_2025[mes_seleccionado_full].empty
@@ -833,11 +829,9 @@ elif menu_principal == "🛒 Tienda Full":
                 if arq.name.endswith((".htm", ".html")):
                     res_html = procesar_archivo_full_html(arq)
                     if res_html:
-                        # Guardar resumen diario y rubros
                         nuevos_registros.append(res_html)
 
             if nuevos_registros:
-                # Convertir a DataFrame acumulado para el mes
                 df_actual = st.session_state.full_2026.get(
                     mes_seleccionado_full, pd.DataFrame()
                 )
@@ -852,19 +846,16 @@ elif menu_principal == "🛒 Tienda Full":
                     st.session_state.full_2025[mes_seleccionado_full] = (
                         df_concatenado
                     )
-                    target_sheet = sheet_f_25
                 else:
                     st.session_state.full_2026[mes_seleccionado_full] = (
                         df_concatenado
                     )
-                    target_sheet = sheet_f_26
 
                 st.success(
                     f"¡{len(nuevos_registros)} archivos de Tienda Full procesados"
                     " con éxito!"
                 )
 
-    # Filtro para excluir rubros que el usuario no desea ver
     st.sidebar.markdown("---")
     st.sidebar.header("⚙️ Configuración de Datos (Full)")
     rubros_excluidos = st.sidebar.multiselect(
@@ -890,7 +881,6 @@ elif menu_principal == "🛒 Tienda Full":
         " 2026)"
     )
 
-    # Indicadores de estado de carga Full
     col_ff1, col_ff2 = st.columns(2)
     with col_ff1:
         if not df_f25.empty:
@@ -926,9 +916,15 @@ elif menu_principal == "🛒 Tienda Full":
         st.markdown("---")
         st.subheader("📋 Detalle de Cierres Diarios (2026)")
         if not df_f26.empty:
-            # Mostrar tabla resumen de cierres cargados
             df_mostrar_26 = df_f26[
-                ["archivo", "cierre", "total_rendir", "efectivo", "tarjetas", "diferencia"]
+                [
+                    "archivo",
+                    "cierre",
+                    "total_rendir",
+                    "efectivo",
+                    "tarjetas",
+                    "diferencia",
+                ]
             ].copy()
             df_mostrar_26.columns = [
                 "Archivo",
