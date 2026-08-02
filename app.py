@@ -89,17 +89,6 @@ def limpiar_serie_numerica(serie):
     return serie.apply(limpiar_numerico)
 
 
-def mapear_turno_2026(val):
-    s = str(val).strip()
-    if s in ["1", "1.0"] or s == "1":
-        return "TURNO NOCHE"
-    elif s in ["2", "2.0"] or s == "2":
-        return "TURNO MAÑANA"
-    elif s in ["3", "3.0"] or s == "3":
-        return "TURNO TARDE"
-    return s.upper() if s else "DESCONOCIDO"
-
-
 def procesar_archivos_playa_detalle(archivos):
     lista_dfs = []
     for archivo in archivos:
@@ -186,21 +175,27 @@ def procesar_df_turnos_2026(df):
     col_inf_diesel = get_col(4, ["infinia diesel"])
     col_total = get_col(5, ["total", "totales"])
 
-    col_turno = None
-    for c in cols:
-        c_low = str(c).lower()
-        if any(k in c_low for k in ["turno", "nro", "shift", "caja"]):
-            col_turno = c
-            break
-    if not col_turno:
-        for c in cols:
-            vals = df[c].dropna().astype(str).str.strip().unique()
-            if any(v in ["1", "2", "3", "1.0", "2.0", "3.0"] for v in vals):
-                col_turno = c
-                break
+    fechas_raw = df[col_fecha].astype(str) if col_fecha in df.columns else pd.Series([""] * len(df))
+    
+    lista_fechas = []
+    lista_turnos = []
+    
+    for val in fechas_raw:
+        val_str = val.strip()
+        turno = "DESCONOCIDO"
+        if "(1)" in val_str or val_str.endswith(" 1") or val_str.endswith("(1)"):
+            turno = "TURNO NOCHE"
+        elif "(2)" in val_str or val_str.endswith(" 2") or val_str.endswith("(2)"):
+            turno = "TURNO MAÑANA"
+        elif "(3)" in val_str or val_str.endswith(" 3") or val_str.endswith("(3)"):
+            turno = "TURNO TARDE"
+            
+        fecha_limpia = re.sub(r'\s*\([123]\)', '', val_str).strip()
+        lista_fechas.append(fecha_limpia)
+        lista_turnos.append(turno)
 
     res = pd.DataFrame()
-    res["Fecha"] = df[col_fecha] if col_fecha in df.columns else ""
+    res["Fecha"] = lista_fechas
     res["NAFTA SUPER"] = limpiar_serie_numerica(df[col_super]) if col_super in df.columns else 0.0
     res["DIESEL 500"] = limpiar_serie_numerica(df[col_diesel]) if col_diesel in df.columns else 0.0
     res["INFINIA NAFTA"] = limpiar_serie_numerica(df[col_inf_nafta]) if col_inf_nafta in df.columns else 0.0
@@ -211,10 +206,7 @@ def procesar_df_turnos_2026(df):
     else:
         res["TOTAL"] = res["NAFTA SUPER"] + res["DIESEL 500"] + res["INFINIA NAFTA"] + res["INFINIA DIESEL"]
 
-    if col_turno and col_turno in df.columns:
-        res["Turno"] = df[col_turno].apply(mapear_turno_2026)
-    else:
-        res["Turno"] = "DESCONOCIDO"
+    res["Turno"] = lista_turnos
 
     if not res.empty:
         mask_basura = res["Fecha"].astype(str).str.strip().str.lower().isin(["fecha apertura", "fecha", "apertura", "nan", ""])
