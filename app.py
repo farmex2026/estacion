@@ -97,7 +97,6 @@ def procesar_archivos_playa_detalle(archivos):
     lista_dfs = []
     for archivo in archivos:
         try:
-            # Leemos sin cabecera fija para garantizar control absoluto de las columnas reales
             df_raw = pd.read_excel(archivo, header=None)
             if len(df_raw) > 7:
                 df_detalles = pd.DataFrame()
@@ -105,12 +104,14 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles["Surtidor/Manguera"] = df_raw.iloc[7:, 1]
                 df_detalles["Producto"] = df_raw.iloc[7:, 3]
 
-                # CORRECCIÓN ESTRICTA: Columna 6 es MONTO ($) y Columna 7 es VOLUMEN (Litros)
+                # Monto (Columna 6) en pesos directos
                 df_detalles["Monto"] = limpiar_serie_numerica(
                     df_raw.iloc[7:, 6]
                 )
-                df_detalles["Volumen"] = limpiar_serie_numerica(
-                    df_raw.iloc[7:, 7]
+
+                # Volumen (Columna 7): Se divide por 1000 porque el Excel exporta en mililitros
+                df_detalles["Volumen"] = (
+                    limpiar_serie_numerica(df_raw.iloc[7:, 7]) / 1000.0
                 )
 
                 df_detalles = df_detalles.dropna(
