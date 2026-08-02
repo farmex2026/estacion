@@ -66,6 +66,28 @@ def fmt_entero(val):
     return f"{int(val):,}".replace(",", ".")
 
 
+def limpiar_numerico(val):
+    if pd.isna(val):
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip()
+    if not s or s.lower() == "nan":
+        return 0.0
+    if "." in s and "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except:
+        return 0.0
+
+
+def limpiar_serie_numerica(serie):
+    return serie.apply(limpiar_numerico)
+
+
 def procesar_archivos_playa_detalle(archivos):
     lista_dfs = []
     for archivo in archivos:
@@ -76,13 +98,11 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles["Fecha y Hora"] = df_raw.iloc[7:, 0]
                 df_detalles["Surtidor/Manguera"] = df_raw.iloc[7:, 1]
                 df_detalles["Producto"] = df_raw.iloc[7:, 3]
-                df_detalles["Monto"] = (
-                    pd.to_numeric(df_raw.iloc[7:, 6], errors="coerce")
-                    .fillna(0)
+                df_detalles["Monto"] = limpiar_serie_numerica(
+                    df_raw.iloc[7:, 6]
                 )
-                df_detalles["Volumen"] = (
-                    pd.to_numeric(df_raw.iloc[7:, 7], errors="coerce")
-                    .fillna(0)
+                df_detalles["Volumen"] = limpiar_serie_numerica(
+                    df_raw.iloc[7:, 7]
                 )
 
                 df_detalles = df_detalles.dropna(
@@ -143,13 +163,9 @@ def cargar_desde_nube(mes, anio):
             rows = data[1:]
             df = pd.DataFrame(rows, columns=headers)
             if "Volumen" in df.columns:
-                df["Volumen"] = pd.to_numeric(
-                    df["Volumen"], errors="coerce"
-                ).fillna(0)
+                df["Volumen"] = limpiar_serie_numerica(df["Volumen"])
             if "Monto" in df.columns:
-                df["Monto"] = pd.to_numeric(
-                    df["Monto"], errors="coerce"
-                ).fillna(0)
+                df["Monto"] = limpiar_serie_numerica(df["Monto"])
             return df
         else:
             st.warning(
