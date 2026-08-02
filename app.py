@@ -10,12 +10,8 @@ st.set_page_config(
     page_title="Gestión Integral de Estación", page_icon="⛽", layout="wide"
 )
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("🛠️ **Creado por Lucas-Farmex 2026**")
-
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
-st.sidebar.markdown("---")
 st.sidebar.header("☁️ Nube Automática")
 st.sidebar.success("✅ Google Sheets Sincronizado")
 
@@ -567,3 +563,14 @@ elif menu_principal == "📦 BOXES":
         st.dataframe(df_b_activo, use_container_width=True)
     else:
         st.info("No hay información de BOXES disponible.")
+
+# ==========================================
+# PIE DE PÁGINA DE LA BARRA LATERAL (CENTRADO)
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.markdown(
+    "<div style='text-align: center; color: gray; font-size: 0.9em;'>"
+    "Desarrollado por Lucas Sellecchia<br><b>Farmex SAIC</b>"
+    "</div>",
+    unsafe_allow_html=True,
+)
