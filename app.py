@@ -16,7 +16,7 @@ URL_NUBE = "https://script.google.com/macros/s/AKfycbxwiBHLjt-sIi74cHB8C9H3ibI-0
 
 st.sidebar.markdown("---")
 st.sidebar.header("☁️ Nube Automática")
-st.sidebar.success("✅ Google Sheets Conectado")
+st.sidebar.success("✅ Google Sheets Sincronizado")
 
 if "datos_2026" not in st.session_state:
     st.session_state.datos_2026 = {}
@@ -135,81 +135,64 @@ def procesar_generico(archivos):
     return pd.DataFrame()
 
 
-col_n1, col_n2 = st.sidebar.columns(2)
-with col_n1:
-    if st.button("💾 Guardar"):
-        try:
-            mes_act = st.session_state.get("mes_trabajo", "Enero")
-            df_a_guardar = st.session_state.datos_2026.get(
-                mes_act, pd.DataFrame()
-            )
-            if not df_a_guardar.empty:
-                payload = {
-                    "month": mes_act,
-                    "headers": df_a_guardar.columns.tolist(),
-                    "rows": df_a_guardar.astype(str).values.tolist(),
-                }
-                requests.post(URL_NUBE, json=payload)
-                st.sidebar.success(f"¡Guardado en Google Sheets ({mes_act})!")
-            else:
-                st.sidebar.warning(f"No hay datos cargados para {mes_act}.")
-        except Exception as e:
-            st.sidebar.error(f"Error: {e}")
-
-with col_n2:
-    if st.button("🔄 Cargar"):
-        try:
-            mes_act = st.session_state.get("mes_trabajo", "Enero")
-            resp = requests.get(f"{URL_NUBE}?month={mes_act}")
-            data = resp.json()
-            if data and len(data) > 1:
-                headers = data[0]
-                rows = data[1:]
-                df_recuperado = pd.DataFrame(rows, columns=headers)
-
-                # Forzar conversión numérica de Volumen y Monto tras cargar desde Google Sheets
-                if "Volumen" in df_recuperado.columns:
-                    df_recuperado["Volumen"] = pd.to_numeric(
-                        df_recuperado["Volumen"], errors="coerce"
-                    ).fillna(0)
-                if "Monto" in df_recuperado.columns:
-                    df_recuperado["Monto"] = pd.to_numeric(
-                        df_recuperado["Monto"], errors="coerce"
-                    ).fillna(0)
-
-                st.session_state.datos_2026[mes_act] = df_recuperado
-                st.sidebar.success(
-                    f"¡Datos de {mes_act} recuperados con éxito!"
-                )
-                st.rerun()
-            else:
-                st.sidebar.warning(
-                    f"No hay datos en la nube para el mes de {mes_act}."
-                )
-        except Exception as e:
-            st.sidebar.error(f"Error: {e}")
-
-
+# ==========================================
+# MENÚ 1: VENTAS 2026 (PLAYA)
+# ==========================================
 if menu_principal == "Ventas 2026":
     st.sidebar.markdown("---")
-    st.sidebar.header("📂 Selección de Mes")
+    st.sidebar.header("📂 Seleccionar Mes a Ver")
     mes_seleccionado = st.sidebar.selectbox(
         "Mes de Trabajo", meses_lista, key="mes_trabajo"
     )
 
-    st.sidebar.markdown("---")
-    st.sidebar.header(f"📥 Carga - Playa Detallada 2026 ({mes_seleccionado})")
-    archivos_playa_26 = st.sidebar.file_uploader(
-        f"Sube archivos Excel Detallados 2026 - {mes_seleccionado}",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key=f"uploader_playa_26_{mes_seleccionado}",
-    )
+    # DESCARGA AUTOMÁTICA DESDE GOOGLE SHEETS AL CAMBIAR DE MES
+    try:
+        resp = requests.get(f"{URL_NUBE}?month={mes_seleccionado}", timeout=5)
+        data = resp.json()
+        if data and len(data) > 1:
+            headers = data[0]
+            rows = data[1:]
+            df_recuperado = pd.DataFrame(rows, columns=headers)
 
-    if archivos_playa_26:
-        df_detalle_26 = procesar_archivos_playa_detalle(archivos_playa_26)
-        if not df_detalle_26.empty:
-            st.session_state.datos_2026[mes_seleccionado] = df_detalle_26
+            if "Volumen" in df_recuperado.columns:
+                df_recuperado["Volumen"] = pd.to_numeric(
+                    df_recuperado["Volumen"], errors="coerce"
+                ).fillna(0)
+            if "Monto" in df_recuperado.columns:
+                df_recuperado["Monto"] = pd.to_numeric(
+                    df_recuperado["Monto"], errors="coerce"
+                ).fillna(0)
+
+            st.session_state.datos_2026[mes_seleccionado] = df_recuperado
+    except Exception:
+        pass
+
+    # PANEL EXCLUSIVO PARA EL ADMINISTRADOR (OCULTO PARA EMPLEADOS)
+    with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
+        st.markdown(
+            "*(Solo para cargar nuevos archivos a la nube del mes seleccionado)*"
+        )
+        archivos_playa_26 = st.file_uploader(
+            f"Subir Excel - {mes_seleccionado}",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key=f"uploader_playa_26_{mes_seleccionado}",
+        )
+
+        if archivos_playa_26:
+            df_detalle_26 = procesar_archivos_playa_detalle(archivos_playa_26)
+            if not df_detalle_26.empty:
+                st.session_state.datos_2026[mes_seleccionado] = df_detalle_26
+                try:
+                    payload = {
+                        "month": mes_seleccionado,
+                        "headers": df_detalle_26.columns.tolist(),
+                        "rows": df_detalle_26.astype(str).values.tolist(),
+                    }
+                    requests.post(URL_NUBE, json=payload, timeout=5)
+                    st.success("¡Subido y guardado en la nube con éxito!")
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
 
     df_2026_detalle = st.session_state.datos_2026.get(
         mes_seleccionado, pd.DataFrame()
@@ -275,85 +258,41 @@ if menu_principal == "Ventas 2026":
         )
     else:
         st.info(
-            f"👈 Sube tus archivos Excel en la barra lateral para comenzar con **{mes_seleccionado}** o haz clic en '🔄 Cargar'."
+            f"No hay registros cargados todavía para el mes de **{mes_seleccionado}**."
         )
 
 
+# ==========================================
+# MENÚ 2: TURNOS POR DÍA
+# ==========================================
 elif menu_principal == "🌙 Turnos por Día":
     st.subheader("🌙 Control de Turnos por Día")
-    st.markdown(
-        "Sube los reportes correspondientes al cierre de turnos operativos."
-    )
-
-    archivos_turnos = st.file_uploader(
-        "Sube archivos de Turnos",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="uploader_turnos",
-    )
-
-    if archivos_turnos:
-        df_turnos = procesar_generico(archivos_turnos)
-        if not df_turnos.empty:
-            st.session_state.turnos_2026["general"] = df_turnos
-            st.success(
-                "¡Archivos de turnos procesados y cargados con éxito!"
-            )
-
     df_t_activo = st.session_state.turnos_2026.get("general", pd.DataFrame())
     if not df_t_activo.empty:
         st.dataframe(df_t_activo, use_container_width=True)
     else:
-        st.info(
-            "Sube los archivos de turnos para visualizar la información consolidada."
-        )
+        st.info("No hay información de turnos disponible.")
 
 
+# ==========================================
+# MENÚ 3: TIENDA FULL
+# ==========================================
 elif menu_principal == "🛒 Tienda Full":
     st.subheader("🛒 Gestión y Ventas - Tienda Full")
-    st.markdown("Sube los reportes de ventas y stock de la Tienda Full.")
-
-    archivos_full = st.file_uploader(
-        "Sube archivos de Tienda Full",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="uploader_full",
-    )
-
-    if archivos_full:
-        df_full = procesar_generico(archivos_full)
-        if not df_full.empty:
-            st.session_state.full_2026["general"] = df_full
-            st.success("¡Reportes de Tienda Full cargados correctamente!")
-
     df_f_activo = st.session_state.full_2026.get("general", pd.DataFrame())
     if not df_f_activo.empty:
         st.dataframe(df_f_activo, use_container_width=True)
     else:
-        st.info("Sube los archivos de la Tienda Full para ver los reportes.")
+        st.info("No hay información de Tienda Full disponible.")
 
 
+# ==========================================
+# MENÚ 4: BOXES
+# ==========================================
 elif menu_principal == "📦 BOXES":
     st.subheader("📦 Control de Servicios - BOXES")
-    st.markdown("Sube los reportes de lubricantes, servicios y boxes.")
-
-    archivos_boxes = st.file_uploader(
-        "Sube archivos de BOXES",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="uploader_boxes",
-    )
-
-    if archivos_boxes:
-        df_boxes = procesar_generico(archivos_boxes)
-        if not df_boxes.empty:
-            st.session_state.boxes_2026["general"] = df_boxes
-            st.success("¡Datos de BOXES cargados con éxito!")
-
     df_b_activo = st.session_state.boxes_2026.get("general", pd.DataFrame())
     if not df_b_activo.empty:
         st.dataframe(df_b_activo, use_container_width=True)
     else:
-        st.info(
-            "Sube los archivos de BOXES para visualizar el resumen operativo."
-        )
+        st.info("No hay información de BOXES disponible.")
