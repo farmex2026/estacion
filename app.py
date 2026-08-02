@@ -51,6 +51,30 @@ meses_lista = [
     "Diciembre",
 ]
 
+meses_map_num = {
+    1: "Enero",
+    2: "Febrero",
+    3: "Marzo",
+    4: "Abril",
+    5: "Mayo",
+    6: "Junio",
+    7: "Julio",
+    8: "Agosto",
+    9: "Septiembre",
+    10: "Octubre",
+    11: "Noviembre",
+    12: "Diciembre",
+}
+
+st.sidebar.markdown("---")
+st.sidebar.header("📅 Visualización de Meses")
+mes_seleccionado = st.sidebar.selectbox(
+    "Mes para Ventas (2025 vs 2026)", meses_lista, key="mes_trabajo"
+)
+mes_turno = st.sidebar.selectbox(
+    "Mes para Turnos 2026", meses_lista, key="mes_turno_trabajo"
+)
+
 
 def fmt_litros(val):
     if pd.isna(val):
@@ -110,7 +134,6 @@ def procesar_archivos_playa_detalle(archivos):
                     df_detalles["Fecha y Hora"], errors="coerce"
                 )
                 df_detalles = df_detalles.dropna(subset=["_fecha_dt"])
-                df_detalles = df_detalles.drop(columns=["_fecha_dt"])
 
                 mask_totales = (
                     df_detalles["Fecha y Hora"]
@@ -233,10 +256,8 @@ def procesar_df_turnos_2026(df):
 def cargar_desde_nube(sheet_name):
     try:
         resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=60)
-
         if resp.status_code != 200:
             return pd.DataFrame()
-
         try:
             data = resp.json()
         except Exception:
@@ -267,21 +288,131 @@ def cargar_desde_nube(sheet_name):
             return df
     except Exception:
         pass
-
     return pd.DataFrame()
+
+
+# ==========================================
+# PANEL DE ADMINISTRACIÓN GLOBAL AUTOMÁTICO
+# ==========================================
+with st.sidebar.expander("🔐 Subir Archivos (Detección Automática)", expanded=True):
+    st.markdown("##### 📁 Archivos Ventas 2025")
+    archivos_playa_25 = st.file_uploader(
+        "Sube tus excels de 2025 (todos juntos)",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="uploader_auto_2025",
+    )
+    if archivos_playa_25:
+        df_det_25 = procesar_archivos_playa_detalle(archivos_playa_25)
+        if not df_det_25.empty:
+            df_det_25["_fecha_dt"] = pd.to_datetime(df_det_25["Fecha y Hora"], errors="coerce")
+            df_det_25["Mes_Num"] = df_det_25["_fecha_dt"].dt.month
+            
+            for mes_num, grupo in df_det_25.groupby("Mes_Num"):
+                if pd.isna(mes_num):
+                    continue
+                nombre_mes = meses_map_num.get(int(mes_num), "")
+                if nombre_mes:
+                    df_limpio = grupo.drop(columns=["_fecha_dt", "Mes_Num"], errors="ignore")
+                    st.session_state.datos_2025[nombre_mes] = df_limpio
+                    sheet_name = f"{nombre_mes} 2025"
+                    try:
+                        df_nube_sub = df_limpio.fillna("").astype(str)
+                        payload = {
+                            "month": sheet_name,
+                            "headers": df_nube_sub.columns.tolist(),
+                            "rows": df_nube_sub.values.tolist(),
+                        }
+                        requests.post(URL_NUBE, json=payload, timeout=60)
+                    except Exception:
+                        pass
+            st.success("¡Ventas 2025 organizadas y guardadas automáticamente!")
+
+    st.markdown("---")
+    st.markdown("##### 📁 Archivos Ventas 2026")
+    archivos_playa_26 = st.file_uploader(
+        "Sube tus excels de 2026 (todos juntos)",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="uploader_auto_2026",
+    )
+    if archivos_playa_26:
+        df_det_26 = procesar_archivos_playa_detalle(archivos_playa_26)
+        if not df_det_26.empty:
+            df_det_26["_fecha_dt"] = pd.to_datetime(df_det_26["Fecha y Hora"], errors="coerce")
+            df_det_26["Mes_Num"] = df_det_26["_fecha_dt"].dt.month
+            
+            for mes_num, grupo in df_det_26.groupby("Mes_Num"):
+                if pd.isna(mes_num):
+                    continue
+                nombre_mes = meses_map_num.get(int(mes_num), "")
+                if nombre_mes:
+                    df_limpio = grupo.drop(columns=["_fecha_dt", "Mes_Num"], errors="ignore")
+                    st.session_state.datos_2026[nombre_mes] = df_limpio
+                    sheet_name = f"{nombre_mes} 2026"
+                    try:
+                        df_nube_sub = df_limpio.fillna("").astype(str)
+                        payload = {
+                            "month": sheet_name,
+                            "headers": df_nube_sub.columns.tolist(),
+                            "rows": df_nube_sub.values.tolist(),
+                        }
+                        requests.post(URL_NUBE, json=payload, timeout=60)
+                    except Exception:
+                        pass
+            st.success("¡Ventas 2026 organizadas y guardadas automáticamente!")
+
+    st.markdown("---")
+    st.markdown("##### 🌙 Archivos Turnos 2026")
+    archivos_turnos = st.file_uploader(
+        "Sube tus excels de Turnos (todos juntos)",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="uploader_auto_turnos",
+    )
+    if archivos_turnos:
+        df_turnos_proc = procesar_archivos_turnos(archivos_turnos)
+        if not df_turnos_proc.empty:
+            df_t_res = procesar_df_turnos_2026(df_turnos_proc)
+            if not df_t_res.empty:
+                def extraer_mes_turno(val_str):
+                    s = str(val_str).lower()
+                    for m_nombre, m_num in meses_map_num.items():
+                        if m_nombre.lower() in s:
+                            return m_num
+                    dt = pd.to_datetime(val_str, errors="coerce", dayfirst=True)
+                    if pd.notna(dt):
+                        return dt.month
+                    return None
+
+                df_t_res["_mes_detectado"] = df_t_res["Fecha"].apply(extraer_mes_turno)
+
+                for mes_num, grupo in df_t_res.groupby("_mes_detectado"):
+                    if pd.isna(mes_num):
+                        continue
+                    nombre_mes = meses_map_num.get(int(mes_num), "")
+                    if nombre_mes:
+                        df_limpio = grupo.drop(columns=["_mes_detectado"], errors="ignore")
+                        st.session_state.turnos_2026[nombre_mes] = df_limpio
+                        sheet_t_name = f"turno{nombre_mes.lower()}2026"
+                        try:
+                            df_para_nube = df_limpio.fillna("").astype(str)
+                            payload = {
+                                "month": sheet_t_name,
+                                "headers": df_para_nube.columns.tolist(),
+                                "rows": df_para_nube.values.tolist(),
+                            }
+                            requests.post(URL_NUBE, json=payload, timeout=60)
+                        except Exception:
+                            pass
+                st.success("¡Turnos organizados y guardados automáticamente por mes!")
 
 
 # ==========================================
 # MENÚ 1: VENTAS (2025 vs 2026)
 # ==========================================
 if menu_principal == "📊 Ventas (2025 vs 2026)":
-    st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes a Ver")
-    mes_seleccionado = st.sidebar.selectbox(
-        "Mes de Trabajo", meses_lista, key="mes_trabajo"
-    )
-
-    if st.sidebar.button("🔄 Recargar datos desde la Nube"):
+    if st.sidebar.button("🔄 Recargar datos desde la Nube (Ventas)"):
         st.session_state.datos_2025.pop(mes_seleccionado, None)
         st.session_state.datos_2026.pop(mes_seleccionado, None)
         st.rerun()
@@ -305,54 +436,6 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         if not df_nube_26.empty:
             st.session_state.datos_2026[mes_seleccionado] = df_nube_26
 
-    with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
-        st.markdown("##### 📁 Subir Datos 2025")
-        archivos_playa_25 = st.file_uploader(
-            f"Excel 2025 - {mes_seleccionado}",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_playa_2025_{mes_seleccionado}",
-        )
-        if archivos_playa_25:
-            df_det_25 = procesar_archivos_playa_detalle(archivos_playa_25)
-            if not df_det_25.empty:
-                st.session_state.datos_2025[mes_seleccionado] = df_det_25
-                try:
-                    df_nube_sub = df_det_25.fillna("").astype(str)
-                    payload = {
-                        "month": sheet_25,
-                        "headers": df_nube_sub.columns.tolist(),
-                        "rows": df_nube_sub.values.tolist(),
-                    }
-                    requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(f"¡Guardado en nube ({sheet_25})!")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-        st.markdown("---")
-        st.markdown("##### 📁 Subir Datos 2026")
-        archivos_playa_26 = st.file_uploader(
-            f"Excel 2026 - {mes_seleccionado}",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_playa_2026_{mes_seleccionado}",
-        )
-        if archivos_playa_26:
-            df_det_26 = procesar_archivos_playa_detalle(archivos_playa_26)
-            if not df_det_26.empty:
-                st.session_state.datos_2026[mes_seleccionado] = df_det_26
-                try:
-                    df_nube_sub = df_det_26.fillna("").astype(str)
-                    payload = {
-                        "month": sheet_26,
-                        "headers": df_nube_sub.columns.tolist(),
-                        "rows": df_nube_sub.values.tolist(),
-                    }
-                    requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(f"¡Guardado en nube ({sheet_26})!")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
     df_25 = st.session_state.datos_2025.get(mes_seleccionado, pd.DataFrame())
     df_26 = st.session_state.datos_2026.get(mes_seleccionado, pd.DataFrame())
 
@@ -362,7 +445,7 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         )
 
         if df_25.empty:
-            st.info(f"ℹ️ Mostrando datos de **2026**. No hay registros cargados de **2025** para el mes de {mes_seleccionado}, por lo que la comparativa se mostrará sin base 2025.")
+            st.info(f"ℹ️ Mostrando datos de **2026**. No hay registros cargados de **2025** para el mes de {mes_seleccionado}.")
 
         litros_25 = df_25["Volumen"].sum() if not df_25.empty else 0.0
         litros_26 = df_26["Volumen"].sum() if not df_26.empty else 0.0
@@ -526,7 +609,7 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
     else:
         st.info(
             f"No hay registros cargados ni para 2025 ni para 2026 en el mes de"
-            f" **{mes_seleccionado}**."
+            f" **{mes_seleccionado}**. Sube tus archivos en el panel de la izquierda."
         )
 
 
@@ -534,12 +617,6 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
 # MENÚ 2: VENTAS POR TURNOS (2026)
 # ==========================================
 elif menu_principal == "🌙 Ventas por Turnos":
-    st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes (Turnos)")
-    mes_turno = st.sidebar.selectbox(
-        "Mes de Turnos", meses_lista, key="mes_turno_trabajo"
-    )
-
     st.subheader(f"🌙 Control de Ventas por Turnos - {mes_turno} (2026)")
 
     if st.sidebar.button("🔄 Recargar Turnos desde la Nube"):
@@ -555,32 +632,6 @@ elif menu_principal == "🌙 Ventas por Turnos":
         df_nube_t26 = cargar_desde_nube(sheet_t_26)
         if not df_nube_t26.empty:
             st.session_state.turnos_2026[mes_turno] = df_nube_t26
-
-    with st.sidebar.expander("🔐 Panel Admin (Subir Excel Turnos 2026)"):
-        archivos_turnos = st.file_uploader(
-            f"Subir Excel Turnos 2026 - {mes_turno}",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_turnos_2026_{mes_turno}",
-        )
-
-        if archivos_turnos:
-            df_turnos_proc = procesar_archivos_turnos(archivos_turnos)
-            if not df_turnos_proc.empty:
-                st.session_state.turnos_2026[mes_turno] = df_turnos_proc
-                try:
-                    df_para_nube = df_turnos_proc.fillna("").astype(str)
-                    payload = {
-                        "month": sheet_t_26,
-                        "headers": df_para_nube.columns.tolist(),
-                        "rows": df_para_nube.values.tolist(),
-                    }
-                    requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(
-                        f"¡Turnos 2026 subidos y guardados en ({sheet_t_26})!"
-                    )
-                except Exception as e:
-                    st.error(f"Error al guardar turnos: {e}")
 
     df_t_26 = st.session_state.turnos_2026.get(mes_turno, pd.DataFrame())
 
@@ -650,7 +701,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
         )
     else:
         st.info(
-            f"No hay registros de ventas por turnos de 2026 cargados para el mes de **{mes_turno}**."
+            f"No hay registros de ventas por turnos cargados para el mes de **{mes_turno}**. Sube tus archivos en el panel de la izquierda."
         )
 
 
@@ -678,7 +729,7 @@ elif menu_principal == "📦 BOXES":
         st.info("No hay información de BOXES disponible.")
 
 # ==========================================
-# PIE DE PÁGINA DE LA BARRA LATERAL (CENTRADO)
+# PIE DE PÁGINA DE LA BARRA LATERAL
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.markdown(
