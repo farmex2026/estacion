@@ -368,7 +368,7 @@ def procesar_archivo_full_html(archivo):
         return None
 
 
-def cargar_desde_nube(sheet_name):
+def cargar_desd_nube(sheet_name):
     try:
         resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=60)
         if resp.status_code != 200:
@@ -403,6 +403,9 @@ def cargar_desde_nube(sheet_name):
     except Exception:
         pass
     return pd.DataFrame()
+
+
+cargar_desde_nube = cargar_desd_nube
 
 
 # ==========================================
@@ -779,7 +782,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
 
 # ==========================================
-# MENÚ 3: TIENDA FULL (2025 vs 2026 + Filtros)
+# MENÚ 3: TIENDA FULL (2025 vs 2026 + Detalle Rubros)
 # ==========================================
 elif menu_principal == "🛒 Tienda Full":
     st.sidebar.markdown("---")
@@ -856,19 +859,6 @@ elif menu_principal == "🛒 Tienda Full":
                     " con éxito!"
                 )
 
-    st.sidebar.markdown("---")
-    st.sidebar.header("⚙️ Configuración de Datos (Full)")
-    rubros_excluidos = st.sidebar.multiselect(
-        "Excluir Rubros / Conceptos",
-        [
-            "00-000 No Asignado",
-            "02-231 Adm. de Tiendas",
-            "21-001 TIENDA RESIDUAL",
-        ],
-        default=["00-000 No Asignado", "02-231 Adm. de Tiendas"],
-        help="Selecciona los rubros que prefieres ocultar de los totales y reportes de Tienda Full.",
-    )
-
     df_f25 = st.session_state.full_2025.get(
         mes_seleccionado_full, pd.DataFrame()
     )
@@ -893,63 +883,128 @@ elif menu_principal == "🛒 Tienda Full":
         else:
             st.warning("⚠️ Tienda Full 2026: Sin cierres cargados")
 
-    if not df_f26.empty or not df_f25.empty:
-        total_gen_26 = (
-            df_f26["total_rendir"].sum() if not df_f26.empty else 0.0
-        )
-        total_gen_25 = (
-            df_f25["total_rendir"].sum() if not df_f25.empty else 0.0
-        )
-        diff_f = total_gen_26 - total_gen_25
-        pct_f = (diff_f / total_gen_25 * 100) if total_gen_25 > 0 else 0.0
-
-        st.metric(
-            label="🛒 Total Facturación Tienda Full (2026)",
-            value=fmt_pesos(total_gen_26),
-            delta=(
-                f"{pct_f:+.2f}% respecto a 2025 ({fmt_pesos(total_gen_25)})"
-                if not df_f25.empty
-                else "Sin datos 2025"
-            ),
-        )
-
+    if not df_f26.empty:
         st.markdown("---")
-        st.subheader("📋 Detalle de Cierres Diarios (2026)")
-        if not df_f26.empty:
-            df_mostrar_26 = df_f26[
-                [
-                    "archivo",
-                    "cierre",
-                    "total_rendir",
-                    "efectivo",
-                    "tarjetas",
-                    "diferencia",
-                ]
-            ].copy()
-            df_mostrar_26.columns = [
-                "Archivo",
-                "Cierre Nro",
-                "Total a Rendir",
-                "Efectivo",
-                "Tarjetas",
-                "Diferencia Caja",
-            ]
+
+        # Consolidar todos los rubros de 2026
+        todos_rubros_26 = []
+        for lst in df_f26.get("rubros", []):
+            if isinstance(lst, list):
+                todos_rubros_26.extend(lst)
+
+        if todos_rubros_26:
+            df_rubros_26 = pd.DataFrame(todos_rubros_26)
+            df_rubros_sum = (
+                df_rubros_26.groupby("Rubro")
+                .agg({"Cantidad": "sum", "Importe": "sum"})
+                .reset_index()
+            )
+
+            # Resumen de Comidas (Comidas + Comidas elaboradas) y Bebidas Calientes
+            st.subheader("🍔 Resumen: Comidas y Bebidas Calientes")
+
+            mask_comidas = (
+                df_rubros_sum["Rubro"].str.upper().str.contains("COMIDA")
+            )
+            df_comidas_detalle = df_rubros_sum[mask_comidas]
+            total_comidas = (
+                df_comidas_detalle["Importe"].sum()
+                if not df_comidas_detalle.empty
+                else 0.0
+            )
+
+            mask_bebidas_cal = df_rubros_sum["Rubro"].str.upper().str.contains(
+                "BEBIDA"
+            ) & df_rubros_sum["Rubro"].str.upper().str.contains("CALIENTE")
+            df_bebidas_cal_detalle = df_rubros_sum[mask_bebidas_cal]
+            total_bebidas_cal = (
+                df_bebidas_cal_detalle["Importe"].sum()
+                if not df_bebidas_cal_detalle.empty
+                else 0.0
+            )
+
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                st.metric(
+                    label="🍲 Total Comidas (Comidas + Elaboradas)",
+                    value=fmt_pesos(total_comidas),
+                )
+                if not df_comidas_detalle.empty:
+                    st.dataframe(
+                        df_comidas_detalle.style.format({
+                            "Cantidad": fmt_entero,
+                            "Importe": fmt_pesos,
+                        }),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            with col_c2:
+                st.metric(
+                    label="☕ Total Bebidas Calientes",
+                    value=fmt_pesos(total_bebidas_cal),
+                )
+                if not df_bebidas_cal_detalle.empty:
+                    st.dataframe(
+                        df_bebidas_cal_detalle.style.format({
+                            "Cantidad": fmt_entero,
+                            "Importe": fmt_pesos,
+                        }),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("Sin registros de Bebidas Calientes.")
+
+            st.markdown("---")
+            st.subheader("📋 Detalle Completo de Todos los Rubros (2026)")
             st.dataframe(
-                df_mostrar_26.style.format({
-                    "Total a Rendir": fmt_pesos,
-                    "Efectivo": fmt_pesos,
-                    "Tarjetas": fmt_pesos,
-                    "Diferencia Caja": fmt_pesos,
+                df_rubros_sum.style.format({
+                    "Cantidad": fmt_entero,
+                    "Importe": fmt_pesos,
                 }),
                 use_container_width=True,
                 hide_index=True,
             )
         else:
-            st.info("No hay cierres diarios de Tienda Full 2026 cargados.")
+            st.info(
+                "No hay datos de rubros detallados en los archivos HTML"
+                " cargados."
+            )
+
+        st.markdown("---")
+        st.subheader("📋 Listado de Cierres Diarios")
+        df_mostrar_26 = df_f26[
+            [
+                "archivo",
+                "cierre",
+                "total_rendir",
+                "efectivo",
+                "tarjetas",
+                "diferencia",
+            ]
+        ].copy()
+        df_mostrar_26.columns = [
+            "Archivo",
+            "Cierre Nro",
+            "Total a Rendir",
+            "Efectivo",
+            "Tarjetas",
+            "Diferencia Caja",
+        ]
+        st.dataframe(
+            df_mostrar_26.style.format({
+                "Total a Rendir": fmt_pesos,
+                "Efectivo": fmt_pesos,
+                "Tarjetas": fmt_pesos,
+                "Diferencia Caja": fmt_pesos,
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.info(
             f"No hay registros de Tienda Full cargados para el mes de"
-            f" **{mes_seleccionado_full}**."
+            f" **{mes_seleccionado_full}** en 2026."
         )
 
 
