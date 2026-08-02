@@ -698,6 +698,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
         " vs 2026)"
     )
 
+    # Indicadores de estado de carga
     col_st1, col_st2 = st.columns(2)
     with col_st1:
         if not df_t_25.empty:
@@ -730,28 +731,17 @@ elif menu_principal == "🌙 Ventas por Turnos":
             else 0.0
         )
 
-        col_t1, col_t2 = st.columns(2)
-        with col_t1:
-            st.metric(
-                label="⛽ Total Litros por Turnos (2026)",
-                value=fmt_litros(total_litros_t26),
-                delta=(
-                    f"{pct_litros_t:+.2f}% respecto a 2025"
-                    f" ({fmt_litros(total_litros_t25)})"
-                    if not df_t_25.empty
-                    else "Sin datos 2025"
-                ),
-            )
-        with col_t2:
-            st.metric(
-                label="🌙 Turnos Registrados (2026)",
-                value=fmt_entero(len(df_t_26)),
-                delta=(
-                    f"2025: {fmt_entero(len(df_t_25))} turnos"
-                    if not df_t_25.empty
-                    else "Sin datos 2025"
-                ),
-            )
+        # Métrica única de total de litros (se removió la métrica de turnos registrados)
+        st.metric(
+            label="⛽ Total Litros por Turnos (2026)",
+            value=fmt_litros(total_litros_t26),
+            delta=(
+                f"{pct_litros_t:+.2f}% respecto a 2025"
+                f" ({fmt_litros(total_litros_t25)})"
+                if not df_t_25.empty
+                else "Sin datos 2025"
+            ),
+        )
 
         st.markdown("---")
         st.subheader("📊 Versus de Ventas por Turno (2025 vs 2026)")
@@ -761,31 +751,32 @@ elif menu_principal == "🌙 Ventas por Turnos":
             if not df_t_25.empty
             else pd.DataFrame(columns=["Turno", "TOTAL"])
         )
-        resumen_t25.rename(columns={"TOTAL": "Litros_25"}, inplace=True)
+        resumen_t25.rename(columns={"TOTAL": "Litros 2025"}, inplace=True)
 
         resumen_t26 = (
             df_t_26.groupby("Turno")["TOTAL"].sum().reset_index()
             if not df_t_26.empty
             else pd.DataFrame(columns=["Turno", "TOTAL"])
         )
-        resumen_t26.rename(columns={"TOTAL": "Litros_26"}, inplace=True)
+        resumen_t26.rename(columns={"TOTAL": "Litros 2026"}, inplace=True)
 
         resumen_turnos_vs = pd.merge(
             resumen_t25, resumen_t26, on="Turno", how="outer"
         ).fillna(0)
         resumen_turnos_vs["Variación (%)"] = resumen_turnos_vs.apply(
             lambda row: (
-                (row["Litros_26"] - row["Litros_25"]) / row["Litros_25"] * 100
+                (row["Litros 2026"] - row["Litros 2025"]) / row["Litros 2025"]
+                * 100
             )
-            if row["Litros_25"] > 0
+            if row["Litros 2025"] > 0
             else 0.0,
             axis=1,
         )
 
         st.dataframe(
             resumen_turnos_vs.style.format({
-                "Litros_25": fmt_litros,
-                "Litros_26": fmt_litros,
+                "Litros 2025": fmt_litros,
+                "Litros 2026": fmt_litros,
                 "Variación (%)": lambda x: f"{x:+.2f}%",
             }),
             use_container_width=True,
