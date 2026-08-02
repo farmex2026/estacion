@@ -12,14 +12,12 @@ st.set_page_config(
 st.sidebar.markdown("---")
 st.sidebar.markdown("🛠️ **Creado por Lucas-Farmex 2026**")
 
-# Configuración de Google Sheets (Nube Automática)
+# URL de Google Sheets configurada directamente en el código
+URL_NUBE = "https://script.google.com/macros/s/AKfycbxwiBHLjt-sIi74cHB8C9H3ibI-0HY4j_SJ4rmJx1hqiQqylgn3x8BYHmFUykU3KabU/exec"
+
 st.sidebar.markdown("---")
 st.sidebar.header("☁️ Nube Automática")
-url_nube = st.sidebar.text_input(
-    "URL Web App Google Sheets",
-    type="password",
-    help="Pega aquí la URL de tu Apps Script de Google",
-)
+st.sidebar.success("✅ Google Sheets Conectado")
 
 # Inicialización de Estados Globales estructurados por Mes
 if "datos_2026" not in st.session_state:
@@ -151,46 +149,43 @@ def procesar_generico(archivos):
 
 
 # Botones de Sincronización Automática con la Nube (Google Sheets)
-if url_nube:
-    col_n1, col_n2 = st.sidebar.columns(2)
-    with col_n1:
-        if st.button("💾 Guardar"):
-            try:
-                mes_act = st.session_state.get("mes_trabajo", "Enero")
-                df_a_guardar = st.session_state.datos_2026.get(
-                    mes_act, pd.DataFrame()
-                )
-                if not df_a_guardar.empty:
-                    payload = {
-                        "headers": df_a_guardar.columns.tolist(),
-                        "rows": df_a_guardar.astype(str).values.tolist(),
-                    }
-                    requests.post(url_nube, json=payload)
-                    st.sidebar.success("¡Guardado en Google Sheets!")
-                else:
-                    st.sidebar.warning("No hay datos cargados para guardar.")
-            except Exception as e:
-                st.sidebar.error(f"Error: {e}")
+col_n1, col_n2 = st.sidebar.columns(2)
+with col_n1:
+    if st.button("💾 Guardar"):
+        try:
+            mes_act = st.session_state.get("mes_trabajo", "Enero")
+            df_a_guardar = st.session_state.datos_2026.get(
+                mes_act, pd.DataFrame()
+            )
+            if not df_a_guardar.empty:
+                payload = {
+                    "headers": df_a_guardar.columns.tolist(),
+                    "rows": df_a_guardar.astype(str).values.tolist(),
+                }
+                requests.post(URL_NUBE, json=payload)
+                st.sidebar.success("¡Guardado en Google Sheets!")
+            else:
+                st.sidebar.warning("No hay datos cargados para guardar.")
+        except Exception as e:
+            st.sidebar.error(f"Error: {e}")
 
-    with col_n2:
-        if st.button("🔄 Cargar"):
-            try:
-                resp = requests.get(url_nube)
-                data = resp.json()
-                if data and len(data) > 1:
-                    headers = data[0]
-                    rows = data[1:]
-                    df_recuperado = pd.DataFrame(rows, columns=headers)
-                    mes_act = st.session_state.get("mes_trabajo", "Enero")
-                    st.session_state.datos_2026[mes_act] = df_recuperado
-                    st.sidebar.success(
-                        "¡Datos recuperados de Google Sheets!"
-                    )
-                    st.rerun()
-                else:
-                    st.sidebar.info("La planilla está vacía.")
-            except Exception as e:
-                st.sidebar.error(f"Error: {e}")
+with col_n2:
+    if st.button("🔄 Cargar"):
+        try:
+            resp = requests.get(URL_NUBE)
+            data = resp.json()
+            if data and len(data) > 1:
+                headers = data[0]
+                rows = data[1:]
+                df_recuperado = pd.DataFrame(rows, columns=headers)
+                mes_act = st.session_state.get("mes_trabajo", "Enero")
+                st.session_state.datos_2026[mes_act] = df_recuperado
+                st.sidebar.success("¡Datos recuperados de Google Sheets!")
+                st.rerun()
+            else:
+                st.sidebar.info("La planilla está vacía.")
+        except Exception as e:
+            st.sidebar.error(f"Error: {e}")
 
 
 # ==========================================
