@@ -2,6 +2,7 @@ import io
 import os
 import re
 import urllib.parse
+from bs4 import BeautifulSoup
 import pandas as pd
 import requests
 import streamlit as st
@@ -23,6 +24,8 @@ if "turnos_2025" not in st.session_state:
     st.session_state.turnos_2025 = {}
 if "turnos_2026" not in st.session_state:
     st.session_state.turnos_2026 = {}
+if "full_2025" not in st.session_state:
+    st.session_state.full_2025 = {}
 if "full_2026" not in st.session_state:
     st.session_state.full_2026 = {}
 if "boxes_2026" not in st.session_state:
@@ -52,6 +55,15 @@ meses_lista = [
     "Noviembre",
     "Diciembre",
 ]
+
+
+def fmt_pesos(val):
+    if pd.isna(val):
+        return "$ 0,00"
+    partes = f"{val:,.2f}".split(".")
+    enteros = partes[0].replace(",", ".")
+    decimales = partes[1]
+    return f"$ {enteros},{decimales}"
 
 
 def fmt_litros(val):
@@ -158,7 +170,6 @@ def procesar_archivos_turnos(archivos):
 def procesar_df_turnos_2026(df):
     if df.empty:
         return pd.DataFrame()
-
     cols = df.columns
 
     def buscar_columna(nombres_posibles):
@@ -191,7 +202,6 @@ def procesar_df_turnos_2026(df):
         if col_fecha in df.columns
         else pd.Series([""] * len(df))
     )
-
     dias_map = {
         "Mon": "Lun",
         "Tue": "Mar",
@@ -216,34 +226,18 @@ def procesar_df_turnos_2026(df):
         val_str = str(val).strip() if pd.notna(val) else ""
         if val_str.lower() in ["nan", "nat", "none"]:
             val_str = ""
-
         turno = "DESCONOCIDO"
-        if (
-            "(1)" in val_str
-            or val_str.endswith(" 1")
-            or val_str.endswith("(1)")
-        ):
+        if "(1)" in val_str or val_str.endswith(" 1"):
             turno = "TURNO NOCHE"
-        elif (
-            "(2)" in val_str
-            or val_str.endswith(" 2")
-            or val_str.endswith("(2)")
-        ):
+        elif "(2)" in val_str or val_str.endswith(" 2"):
             turno = "TURNO MAÑANA"
-        elif (
-            "(3)" in val_str
-            or val_str.endswith(" 3")
-            or val_str.endswith("(3)")
-        ):
+        elif "(3)" in val_str or val_str.endswith(" 3"):
             turno = "TURNO TARDE"
-
         fecha_limpia = re.sub(r"\s*\([123]\)", "", val_str).strip()
-
         for eng, esp in dias_map.items():
             fecha_limpia = re.sub(
                 r"\b" + eng + r"\b", esp, fecha_limpia, flags=re.IGNORECASE
             )
-
         lista_fechas.append(fecha_limpia)
         lista_turnos.append(turno)
 
@@ -269,14 +263,12 @@ def procesar_df_turnos_2026(df):
         if col_inf_diesel and col_inf_diesel in df.columns
         else 0.0
     )
-
     res["TOTAL"] = (
         res["NAFTA SUPER"]
         + res["DIESEL 500"]
         + res["INFINIA NAFTA"]
         + res["INFINIA DIESEL"]
     )
-
     res["Turno"] = lista_turnos
 
     if not res.empty:
@@ -288,25 +280,105 @@ def procesar_df_turnos_2026(df):
             .isin(["fecha apertura", "fecha", "apertura", "nan", ""])
         )
         res = res[~mask_basura].reset_index(drop=True)
-
     return res
+
+
+def procesar_archivo_full_html(archivo):
+    """Procesa los archivos HTML de Cierre de Caja de Tienda Full."""
+    try:
+        content = archivo.read()
+        try:
+            html_text = content.decode("windows-1252")
+        except:
+            html_text = content.decode("utf-8", errors="ignore")
+
+        soup = BeautifulSoup(html_text, "html.parser")
+        texto_plano = soup.get_text()
+        lineas = [
+            line.strip() for line in texto_plano.split("\n") if line.strip()
+        ]
+
+        # Extraer datos clave
+        cierre_nro = ""
+        total_rendir = 0.0
+        efectivo = 0.0
+        tarjetas = 0.0
+        diferencia = 0.0
+
+        rubros_data = []
+        capturando_rubros = False
+
+        for i, linea in enumerate(lineas):
+            if "CIERRE DE CAJA NRO:" in linea:
+                cierre_nro = linea
+            if "RUBRO                  CANTIDAD  IMPORTE" in linea:
+                capturando_rubros = True
+                continue
+            if capturando_rubros:
+                if (
+                    "TOTAL PERCEPCIONES" in linea
+                    or "----------------" in linea
+                    or "TOTAL A RENDIR" in linea
+                ):
+                    capturando_rubros = False
+                else:
+                    # Parsear línea de rubro ej: "21-001 TIENDA RESIDUAL        44,0    17600,00"
+                    match = re.match(
+                        r"^([0-9\-]+)\s+(.+?)\s+([0-9\-\.,]+)\s+([0-9\-\.,]+)$",
+                        linea,
+                    )
+                    if match:
+                        cod, desc, cant, imp = match.groups()
+                        rubros_data.append({
+                            "Codigo": cod,
+                            "Rubro": desc.strip(),
+                            "Cantidad": limpiar_numerico(cant),
+                            "Importe": limpiar_numerico(imp),
+                        })
+
+            if "TOTAL A RENDIR" in linea:
+                partes = linea.split(":")
+                if len(partes) > 1:
+                    total_rendir = limpiar_numerico(partes[1])
+            if "- EFECTIVO" in linea:
+                partes = linea.split(":")
+                if len(partes) > 1:
+                    efectivo = limpiar_numerico(partes[1])
+            if "- TARJETAS" in linea:
+                partes = linea.split(":")
+                if len(partes) > 1:
+                    tarjetas = limpiar_numerico(partes[1])
+            if "DIFERENCIA CAJA" in linea:
+                partes = linea.split(":")
+                if len(partes) > 1:
+                    diferencia = limpiar_numerico(partes[1])
+
+        # Intentar extraer fecha del nombre del archivo o contenido
+        fecha_str = archivo.name.replace(".htm", "").replace(".html", "")
+
+        return {
+            "archivo": archivo.name,
+            "cierre": cierre_nro,
+            "fecha": fecha_str,
+            "total_rendir": total_rendir,
+            "efectivo": efectivo,
+            "tarjetas": tarjetas,
+            "diferencia": diferencia,
+            "rubros": rubros_data,
+        }
+    except Exception as e:
+        st.error(f"Error al procesar archivo Full {archivo.name}: {e}")
+        return None
 
 
 def cargar_desde_nube(sheet_name):
     try:
         resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=60)
-
         if resp.status_code != 200:
             return pd.DataFrame()
-
-        try:
-            data = resp.json()
-        except Exception:
-            return pd.DataFrame()
-
+        data = resp.json()
         if isinstance(data, dict) and "error" in data:
             return pd.DataFrame()
-
         if data and len(data) > 1:
             headers = data[0]
             rows = data[1:]
@@ -323,13 +395,16 @@ def cargar_desde_nube(sheet_name):
                         "diesel",
                         "infinia",
                         "total",
+                        "importe",
+                        "efectivo",
+                        "tarjetas",
+                        "diferencia",
                     ]
                 ):
                     df[col] = limpiar_serie_numerica(df[col])
             return df
     except Exception:
         pass
-
     return pd.DataFrame()
 
 
@@ -415,14 +490,6 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         st.subheader(
             f"📈 Comparativa General - {mes_seleccionado} (2025 vs 2026)"
         )
-
-        if df_25.empty:
-            st.info(
-                f"ℹ️ Mostrando datos de **2026**. No hay registros cargados"
-                f" de **2025** para el mes de {mes_seleccionado}, por lo que la"
-                " comparativa se mostrará sin base 2025."
-            )
-
         litros_25 = df_25["Volumen"].sum() if not df_25.empty else 0.0
         litros_26 = df_26["Volumen"].sum() if not df_26.empty else 0.0
         diff_litros = litros_26 - litros_25
@@ -434,21 +501,6 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         desp_26 = len(df_26) if not df_26.empty else 0
         diff_desp = desp_26 - desp_25
         pct_desp = ((diff_desp / desp_25 * 100) if desp_25 > 0 else 0.0)
-
-        if not df_25.empty and litros_25 > litros_26:
-            st.info(
-                f"💡 **Lectura de ventas ({mes_seleccionado}):** Se vendió"
-                f" **más en 2025** ({fmt_litros(litros_25)}) que en **2026**"
-                f" ({fmt_litros(litros_26)}). La variación es de"
-                f" **{pct_litros:+.2f}%**."
-            )
-        elif not df_25.empty and litros_26 > litros_25:
-            st.success(
-                f"💡 **Lectura de ventas ({mes_seleccionado}):** Se vendió"
-                f" **más en 2026** ({fmt_litros(litros_26)}) que en **2025**"
-                f" ({fmt_litros(litros_25)}). La variación es de"
-                f" **{pct_litros:+.2f}%**."
-            )
 
         col_m1, col_m2 = st.columns(2)
         with col_m1:
@@ -514,10 +566,8 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
             df_mix_vs = pd.merge(
                 mix_25, mix_26, on="Producto_Upper", how="outer"
             ).fillna(0)
-
             total_litros_25_mix = df_mix_vs["Litros_25"].sum()
             total_litros_26_mix = df_mix_vs["Litros_26"].sum()
-
             df_mix_vs["Mix_25"] = df_mix_vs.apply(
                 lambda row: (row["Litros_25"] / total_litros_25_mix * 100)
                 if total_litros_25_mix > 0
@@ -530,7 +580,6 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                 else 0.0,
                 axis=1,
             )
-
             df_mix_vs["Variación Litros (%)"] = df_mix_vs.apply(
                 lambda row: (
                     (row["Litros_26"] - row["Litros_25"])
@@ -566,31 +615,6 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                 use_container_width=True,
                 hide_index=True,
             )
-
-        with st.expander("🔍 Ver transacciones detalladas completas 2026"):
-            if not df_26.empty:
-                st.dataframe(df_26, use_container_width=True, hide_index=True)
-            else:
-                st.warning("No hay transacciones de 2026 para mostrar.")
-
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            if not df_26.empty:
-                df_26.to_excel(
-                    writer, sheet_name="Detalle 2026", index=False
-                )
-            if not df_25.empty:
-                df_25.to_excel(
-                    writer, sheet_name="Detalle 2025", index=False
-                )
-
-        st.markdown("---")
-        st.download_button(
-            label=f"📥 Descargar Reporte Comparativo ({mes_seleccionado})",
-            data=output.getvalue(),
-            file_name=f"comparativa_ventas_{mes_seleccionado}_2025_2026.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
     else:
         st.info(
             f"No hay registros cargados ni para 2025 ni para 2026 en el mes de"
@@ -637,12 +661,11 @@ elif menu_principal == "🌙 Ventas por Turnos":
             "Año del Archivo (Turnos)", [2026, 2025], index=0, key="anio_up_t"
         )
         archivos_turnos = st.file_uploader(
-            f"Subir Excel Turnos {anio_upload_turno} - {mes_seleccionado_turno}",
+            f"Subir Excel Turnos {anio_upload_turno}",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key=f"uploader_turnos_{anio_upload_turno}_{mes_seleccionado_turno}",
         )
-
         if archivos_turnos:
             df_t_raw = procesar_archivos_turnos(archivos_turnos)
             if not df_t_raw.empty:
@@ -658,7 +681,6 @@ elif menu_principal == "🌙 Ventas por Turnos":
                             df_t_res
                         )
                         sheet_target = sheet_t_26
-
                     try:
                         df_para_nube = df_t_res.fillna("").astype(str)
                         payload = {
@@ -668,9 +690,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
                         }
                         requests.post(URL_NUBE, json=payload, timeout=60)
                         st.success(
-                            f"¡Turnos {anio_upload_turno}"
-                            f" ({mes_seleccionado_turno}) subidos y"
-                            " sincronizados!"
+                            f"¡Turnos {anio_upload_turno} sincronizados!"
                         )
                     except Exception as e:
                         st.error(f"Error al guardar turnos: {e}")
@@ -681,7 +701,6 @@ elif menu_principal == "🌙 Ventas por Turnos":
     df_t26_raw = st.session_state.turnos_2026.get(
         mes_seleccionado_turno, pd.DataFrame()
     )
-
     df_t_25 = (
         df_t25_raw
         if ("Turno" in df_t25_raw.columns or df_t25_raw.empty)
@@ -698,29 +717,6 @@ elif menu_principal == "🌙 Ventas por Turnos":
         " vs 2026)"
     )
 
-    # Indicadores de estado de carga
-    col_st1, col_st2 = st.columns(2)
-    with col_st1:
-        if not df_t_25.empty:
-            st.success(
-                f"✅ Turnos 2025 ({mes_seleccionado_turno}): Cargados"
-                f" ({fmt_entero(len(df_t_25))} registros)"
-            )
-        else:
-            st.warning(
-                f"⚠️ Turnos 2025 ({mes_seleccionado_turno}): Sin datos cargados"
-            )
-    with col_st2:
-        if not df_t_26.empty:
-            st.success(
-                f"✅ Turnos 2026 ({mes_seleccionado_turno}): Cargados"
-                f" ({fmt_entero(len(df_t_26))} registros)"
-            )
-        else:
-            st.warning(
-                f"⚠️ Turnos 2026 ({mes_seleccionado_turno}): Sin datos cargados"
-            )
-
     if not df_t_25.empty or not df_t_26.empty:
         total_litros_t25 = df_t_25["TOTAL"].sum() if not df_t_25.empty else 0.0
         total_litros_t26 = df_t_26["TOTAL"].sum() if not df_t_26.empty else 0.0
@@ -731,7 +727,6 @@ elif menu_principal == "🌙 Ventas por Turnos":
             else 0.0
         )
 
-        # Métrica única de total de litros (se removió la métrica de turnos registrados)
         st.metric(
             label="⛽ Total Litros por Turnos (2026)",
             value=fmt_litros(total_litros_t26),
@@ -745,14 +740,12 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
         st.markdown("---")
         st.subheader("📊 Versus de Ventas por Turno (2025 vs 2026)")
-
         resumen_t25 = (
             df_t_25.groupby("Turno")["TOTAL"].sum().reset_index()
             if not df_t_25.empty
             else pd.DataFrame(columns=["Turno", "TOTAL"])
         )
         resumen_t25.rename(columns={"TOTAL": "Litros 2025"}, inplace=True)
-
         resumen_t26 = (
             df_t_26.groupby("Turno")["TOTAL"].sum().reset_index()
             if not df_t_26.empty
@@ -782,76 +775,186 @@ elif menu_principal == "🌙 Ventas por Turnos":
             use_container_width=True,
             hide_index=True,
         )
-
-        with st.expander("📋 Ver detalle completo de turnos por año"):
-            col_dt1, col_dt2 = st.columns(2)
-            with col_dt1:
-                st.markdown("**Turnos 2025**")
-                if not df_t_25.empty:
-                    st.dataframe(
-                        df_t_25.style.format({
-                            "NAFTA SUPER": fmt_litros,
-                            "DIESEL 500": fmt_litros,
-                            "INFINIA NAFTA": fmt_litros,
-                            "INFINIA DIESEL": fmt_litros,
-                            "TOTAL": fmt_litros,
-                        }),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.info("Sin datos de turnos para 2025.")
-            with col_dt2:
-                st.markdown("**Turnos 2026**")
-                if not df_t_26.empty:
-                    st.dataframe(
-                        df_t_26.style.format({
-                            "NAFTA SUPER": fmt_litros,
-                            "DIESEL 500": fmt_litros,
-                            "INFINIA NAFTA": fmt_litros,
-                            "INFINIA DIESEL": fmt_litros,
-                            "TOTAL": fmt_litros,
-                        }),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.info("Sin datos de turnos para 2026.")
-
-        output_t = io.BytesIO()
-        with pd.ExcelWriter(output_t, engine="openpyxl") as writer:
-            if not df_t_26.empty:
-                df_t_26.to_excel(writer, sheet_name="Turnos 2026", index=False)
-            if not df_t_25.empty:
-                df_t_25.to_excel(writer, sheet_name="Turnos 2025", index=False)
-            resumen_turnos_vs.to_excel(
-                writer, sheet_name="Resumen Comparativo", index=False
-            )
-
-        st.markdown("---")
-        st.download_button(
-            label=f"📥 Descargar Reporte Comparativo de Turnos ({mes_seleccionado_turno})",
-            data=output_t.getvalue(),
-            file_name=f"comparativa_turnos_{mes_seleccionado_turno}_2025_2026.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
     else:
         st.info(
-            f"No hay registros de ventas por turnos cargados ni para 2025 ni"
-            f" para 2026 en el mes de **{mes_seleccionado_turno}**."
+            f"No hay registros de turnos cargados para {mes_seleccionado_turno}."
         )
 
 
 # ==========================================
-# MENÚ 3: TIENDA FULL
+# MENÚ 3: TIENDA FULL (2025 vs 2026 + Filtros)
 # ==========================================
 elif menu_principal == "🛒 Tienda Full":
-    st.subheader("🛒 Gestión y Ventas - Tienda Full")
-    df_f_activo = st.session_state.full_2026.get("general", pd.DataFrame())
-    if not df_f_activo.empty:
-        st.dataframe(df_f_activo, use_container_width=True, hide_index=True)
+    st.sidebar.markdown("---")
+    st.sidebar.header("📂 Seleccionar Mes (Tienda Full)")
+    mes_seleccionado_full = st.sidebar.selectbox(
+        "Mes Tienda Full", meses_lista, key="mes_full_trabajo"
+    )
+
+    if st.sidebar.button("🔄 Recargar Tienda Full desde la Nube"):
+        st.session_state.full_2025.pop(mes_seleccionado_full, None)
+        st.session_state.full_2026.pop(mes_seleccionado_full, None)
+        st.rerun()
+
+    sheet_f_25 = f"full_{mes_seleccionado_full.lower()}_2025"
+    sheet_f_26 = f"full_{mes_seleccionado_full.lower()}_2026"
+
+    # Cargar de nube si está vacío
+    if (
+        mes_seleccionado_full not in st.session_state.full_2025
+        or st.session_state.full_2025[mes_seleccionado_full].empty
+    ):
+        df_nube_f25 = cargar_desde_nube(sheet_f_25)
+        if not df_nube_f25.empty:
+            st.session_state.full_2025[mes_seleccionado_full] = df_nube_f25
+
+    if (
+        mes_seleccionado_full not in st.session_state.full_2026
+        or st.session_state.full_2026[mes_seleccionado_full].empty
+    ):
+        df_nube_f26 = cargar_desde_nube(sheet_f_26)
+        if not df_nube_f26.empty:
+            st.session_state.full_2026[mes_seleccionado_full] = df_nube_f26
+
+    with st.sidebar.expander("🔐 Panel Admin (Subir Cierres Full)"):
+        anio_upload_full = st.selectbox(
+            "Año del Cierre Full", [2026, 2025], index=0, key="anio_up_f"
+        )
+        archivos_full = st.file_uploader(
+            f"Subir Planillas Full ({anio_upload_full})",
+            type=["htm", "html", "xlsx", "xls"],
+            accept_multiple_files=True,
+            key=f"uploader_full_{anio_upload_full}_{mes_seleccionado_full}",
+        )
+
+        if archivos_full:
+            nuevos_registros = []
+            for arq in archivos_full:
+                if arq.name.endswith((".htm", ".html")):
+                    res_html = procesar_archivo_full_html(arq)
+                    if res_html:
+                        # Guardar resumen diario y rubros
+                        nuevos_registros.append(res_html)
+
+            if nuevos_registros:
+                # Convertir a DataFrame acumulado para el mes
+                df_actual = st.session_state.full_2026.get(
+                    mes_seleccionado_full, pd.DataFrame()
+                )
+                df_nuevos = pd.DataFrame(nuevos_registros)
+                df_concatenado = (
+                    pd.concat([df_actual, df_nuevos], ignore_index=True)
+                    .drop_duplicates(subset=["archivo"])
+                    .reset_index(drop=True)
+                )
+
+                if anio_upload_full == 2025:
+                    st.session_state.full_2025[mes_seleccionado_full] = (
+                        df_concatenado
+                    )
+                    target_sheet = sheet_f_25
+                else:
+                    st.session_state.full_2026[mes_seleccionado_full] = (
+                        df_concatenado
+                    )
+                    target_sheet = sheet_f_26
+
+                st.success(
+                    f"¡{len(nuevos_registros)} archivos de Tienda Full procesados"
+                    " con éxito!"
+                )
+
+    # Filtro para excluir rubros que el usuario no desea ver
+    st.sidebar.markdown("---")
+    st.sidebar.header("⚙️ Configuración de Datos (Full)")
+    rubros_excluidos = st.sidebar.multiselect(
+        "Excluir Rubros / Conceptos",
+        [
+            "00-000 No Asignado",
+            "02-231 Adm. de Tiendas",
+            "21-001 TIENDA RESIDUAL",
+        ],
+        default=["00-000 No Asignado", "02-231 Adm. de Tiendas"],
+        help="Selecciona los rubros que prefieres ocultar de los totales y reportes de Tienda Full.",
+    )
+
+    df_f25 = st.session_state.full_2025.get(
+        mes_seleccionado_full, pd.DataFrame()
+    )
+    df_f26 = st.session_state.full_2026.get(
+        mes_seleccionado_full, pd.DataFrame()
+    )
+
+    st.subheader(
+        f"🛒 Gestión y Ventas Tienda Full - {mes_seleccionado_full} (2025 vs"
+        " 2026)"
+    )
+
+    # Indicadores de estado de carga Full
+    col_ff1, col_ff2 = st.columns(2)
+    with col_ff1:
+        if not df_f25.empty:
+            st.success(f"✅ Tienda Full 2025: {len(df_f25)} cierres cargados")
+        else:
+            st.warning("⚠️ Tienda Full 2025: Sin cierres cargados")
+    with col_ff2:
+        if not df_f26.empty:
+            st.success(f"✅ Tienda Full 2026: {len(df_f26)} cierres cargados")
+        else:
+            st.warning("⚠️ Tienda Full 2026: Sin cierres cargados")
+
+    if not df_f26.empty or not df_f25.empty:
+        total_gen_26 = (
+            df_f26["total_rendir"].sum() if not df_f26.empty else 0.0
+        )
+        total_gen_25 = (
+            df_f25["total_rendir"].sum() if not df_f25.empty else 0.0
+        )
+        diff_f = total_gen_26 - total_gen_25
+        pct_f = (diff_f / total_gen_25 * 100) if total_gen_25 > 0 else 0.0
+
+        st.metric(
+            label="🛒 Total Facturación Tienda Full (2026)",
+            value=fmt_pesos(total_gen_26),
+            delta=(
+                f"{pct_f:+.2f}% respecto a 2025 ({fmt_pesos(total_gen_25)})"
+                if not df_f25.empty
+                else "Sin datos 2025"
+            ),
+        )
+
+        st.markdown("---")
+        st.subheader("📋 Detalle de Cierres Diarios (2026)")
+        if not df_f26.empty:
+            # Mostrar tabla resumen de cierres cargados
+            df_mostrar_26 = df_f26[
+                ["archivo", "cierre", "total_rendir", "efectivo", "tarjetas", "diferencia"]
+            ].copy()
+            df_mostrar_26.columns = [
+                "Archivo",
+                "Cierre Nro",
+                "Total a Rendir",
+                "Efectivo",
+                "Tarjetas",
+                "Diferencia Caja",
+            ]
+            st.dataframe(
+                df_mostrar_26.style.format({
+                    "Total a Rendir": fmt_pesos,
+                    "Efectivo": fmt_pesos,
+                    "Tarjetas": fmt_pesos,
+                    "Diferencia Caja": fmt_pesos,
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No hay cierres diarios de Tienda Full 2026 cargados.")
     else:
-        st.info("No hay información de Tienda Full disponible.")
+        st.info(
+            f"No hay registros de Tienda Full cargados para el mes de"
+            f" **{mes_seleccionado_full}**."
+        )
 
 
 # ==========================================
