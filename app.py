@@ -249,9 +249,10 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
             st.session_state.datos_2026[mes_seleccionado] = df_nube_26
 
     with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
+        st.markdown("1 - Informe Vox")
         anio_upload = st.selectbox("Año del Archivo", [2026, 2025], index=0)
         archivos_playa = st.file_uploader(
-            f"Subir Excel - {mes_seleccionado} {anio_upload}",
+            mes_seleccionado,
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key=f"uploader_playa_{anio_upload}_{mes_seleccionado}",
@@ -458,9 +459,8 @@ elif menu_principal == "🌙 Ventas por Turnos":
             st.session_state.turnos_2026[mes_turno] = df_nube_t
 
     with st.sidebar.expander("🔐 Panel Admin (Subir Excel Turnos)"):
-        st.markdown("1 - Informe Vox")
         archivos_turnos = st.file_uploader(
-            mes_turno,
+            f"Subir Excel Turnos - {mes_turno}",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key=f"uploader_turnos_{mes_turno}",
@@ -566,4 +566,4 @@ elif menu_principal == "📦 BOXES":
     if not df_b_activo.empty:
         st.dataframe(df_b_activo, use_container_width=True)
     else:
-        st.info("📦 Control de Servicios - BOXES")
+        st.info("No hay información de BOXES disponible.")
