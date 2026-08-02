@@ -12,14 +12,12 @@ st.set_page_config(
 st.sidebar.markdown("---")
 st.sidebar.markdown("🛠️ **Creado por Lucas-Farmex 2026**")
 
-# URL de Google Sheets configurada directamente en el código
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxwiBHLjt-sIi74cHB8C9H3ibI-0HY4j_SJ4rmJx1hqiQqylgn3x8BYHmFUykU3KabU/exec"
 
 st.sidebar.markdown("---")
 st.sidebar.header("☁️ Nube Automática")
 st.sidebar.success("✅ Google Sheets Conectado")
 
-# Inicialización de Estados Globales estructurados por Mes
 if "datos_2026" not in st.session_state:
     st.session_state.datos_2026 = {}
 if "turnos_2026" not in st.session_state:
@@ -50,7 +48,6 @@ meses_lista = [
 ]
 
 
-# Funciones de Formato Estilo Argentino
 def fmt_litros(val):
     if pd.isna(val):
         return "0,00 L"
@@ -75,7 +72,6 @@ def fmt_porcentaje(val):
     return f"{enteros},{decimales}%"
 
 
-# Funciones de Procesamiento Genéricas
 def procesar_archivos_playa_detalle(archivos):
     lista_dfs = []
     for archivo in archivos:
@@ -139,7 +135,6 @@ def procesar_generico(archivos):
     return pd.DataFrame()
 
 
-# Botones de Sincronización Automática con la Nube (Google Sheets por Mes)
 col_n1, col_n2 = st.sidebar.columns(2)
 with col_n1:
     if st.button("💾 Guardar"):
@@ -171,6 +166,17 @@ with col_n2:
                 headers = data[0]
                 rows = data[1:]
                 df_recuperado = pd.DataFrame(rows, columns=headers)
+
+                # Forzar conversión numérica de Volumen y Monto tras cargar desde Google Sheets
+                if "Volumen" in df_recuperado.columns:
+                    df_recuperado["Volumen"] = pd.to_numeric(
+                        df_recuperado["Volumen"], errors="coerce"
+                    ).fillna(0)
+                if "Monto" in df_recuperado.columns:
+                    df_recuperado["Monto"] = pd.to_numeric(
+                        df_recuperado["Monto"], errors="coerce"
+                    ).fillna(0)
+
                 st.session_state.datos_2026[mes_act] = df_recuperado
                 st.sidebar.success(
                     f"¡Datos de {mes_act} recuperados con éxito!"
@@ -184,9 +190,6 @@ with col_n2:
             st.sidebar.error(f"Error: {e}")
 
 
-# ==========================================
-# MENÚ 1: VENTAS 2026 (PLAYA)
-# ==========================================
 if menu_principal == "Ventas 2026":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Selección de Mes")
@@ -276,9 +279,6 @@ if menu_principal == "Ventas 2026":
         )
 
 
-# ==========================================
-# MENÚ 2: TURNOS POR DÍA
-# ==========================================
 elif menu_principal == "🌙 Turnos por Día":
     st.subheader("🌙 Control de Turnos por Día")
     st.markdown(
@@ -309,9 +309,6 @@ elif menu_principal == "🌙 Turnos por Día":
         )
 
 
-# ==========================================
-# MENÚ 3: TIENDA FULL
-# ==========================================
 elif menu_principal == "🛒 Tienda Full":
     st.subheader("🛒 Gestión y Ventas - Tienda Full")
     st.markdown("Sube los reportes de ventas y stock de la Tienda Full.")
@@ -336,9 +333,6 @@ elif menu_principal == "🛒 Tienda Full":
         st.info("Sube los archivos de la Tienda Full para ver los reportes.")
 
 
-# ==========================================
-# MENÚ 4: BOXES
-# ==========================================
 elif menu_principal == "📦 BOXES":
     st.subheader("📦 Control de Servicios - BOXES")
     st.markdown("Sube los reportes de lubricantes, servicios y boxes.")
