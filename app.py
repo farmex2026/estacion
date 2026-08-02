@@ -128,7 +128,6 @@ def procesar_archivos_playa_detalle(archivos):
 def cargar_desde_nube(mes, anio):
     sheet_name = f"{mes} {anio}"
     try:
-        # Usamos params para que codifique correctamente el espacio en la URL
         resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=5)
         data = resp.json()
         if data and len(data) > 1:
@@ -159,7 +158,7 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         "Mes de Trabajo", meses_lista, key="mes_trabajo"
     )
 
-    # FORZAMOS LA DESCARGA DESDE LA NUBE AL CAMBIAR DE MES
+    # DESCARGA DESDE LA NUBE
     st.session_state.datos_2025[mes_seleccionado] = cargar_desde_nube(
         mes_seleccionado, 2025
     )
@@ -167,7 +166,7 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         mes_seleccionado, 2026
     )
 
-    # PANEL EXCLUSIVO PARA EL ADMINISTRADOR (SUBIDA DE EXCEL 2025 / 2026)
+    # PANEL ADMINISTRADOR
     with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
         anio_upload = st.selectbox("Año del Archivo", [2026, 2025], index=0)
         archivos_playa = st.file_uploader(
@@ -213,7 +212,7 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
 
     if not df_25.empty or not df_26.empty:
         st.subheader(
-            f"📈 Comparativa de Ventas - {mes_seleccionado} (2025 vs 2026)"
+            f"📈 Comparativa General - {mes_seleccionado} (2025 vs 2026)"
         )
 
         litros_25 = df_25["Volumen"].sum() if not df_25.empty else 0.0
@@ -228,43 +227,84 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         diff_desp = desp_26 - desp_25
         pct_desp = ((diff_desp / desp_25 * 100) if desp_25 > 0 else 0.0)
 
-        col_c1, col_c2 = st.columns(2)
-        with col_c1:
+        # MÉTRICAS GENERALES CLaras
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
             st.metric(
-                label=f"⛽ Litros Vendidos ({mes_seleccionado})",
+                label="⛽ Total Litros Vendidos",
                 value=f"2026: {fmt_litros(litros_26)}",
                 delta=(
                     f"vs 2025 ({fmt_litros(litros_25)}) ->"
                     f" {pct_litros:+.2f}%"
                 ),
             )
-        with col_c2:
+        with col_m2:
             st.metric(
-                label=f"🧾 Cantidad de Despachos ({mes_seleccionado})",
+                label="🧾 Total de Despachos",
                 value=f"2026: {fmt_entero(desp_26)}",
                 delta=f"vs 2025 ({fmt_entero(desp_25)}) -> {pct_desp:+.2f}%",
             )
 
         st.markdown("---")
-        st.subheader("⛽ Análisis de Mix de Productos (2026)")
+        st.subheader("⛽ Versus de Combustibles (2025 vs 2026)")
+
+        # Preparar mix de 2025
+        if not df_25.empty:
+            df_25["Producto_Upper"] = (
+                df_25["Producto"].astype(str).str.strip().str.upper()
+            )
+            mix_25 = (
+                df_25.groupby("Producto_Upper")
+                .agg(Litros_25=("Volumen", "sum"), Despachos_25=("Volumen", "count"))
+                .reset_index()
+            )
+        else:
+            mix_25 = pd.DataFrame(columns=["Producto_Upper", "Litros_25", "Despachos_25"])
+
+        # Preparar mix de 2026
         if not df_26.empty:
             df_26["Producto_Upper"] = (
                 df_26["Producto"].astype(str).str.strip().str.upper()
             )
-            df_mix_26 = (
+            mix_26 = (
                 df_26.groupby("Producto_Upper")
-                .agg(Litros=("Volumen", "sum"), Despachos=("Volumen", "count"))
+                .agg(Litros_26=("Volumen", "sum"), Despachos_26=("Volumen", "count"))
                 .reset_index()
             )
+        else:
+            mix_26 = pd.DataFrame(columns=["Producto_Upper", "Litros_26", "Despachos_26"])
+
+        # Unir ambos años para hacer el versus por combustible
+        if not mix_25.empty or not mix_26.empty:
+            df_mix_vs = pd.merge(mix_25, mix_26, on="Producto_Upper", how="outer").fillna(0)
+            df_mix_vs["Variación Litros (%)"] = df_mix_vs.apply(
+                lambda row: ((row["Litros_26"] - row["Litros_25"]) / row["Litros_25"] * 100) 
+                if row["Litros_25"] > 0 else 0.0,
+                axis=1
+            )
+            
+            # Renombrar columnas para mostrar prolijo
+            df_tabla_final = pd.DataFrame({
+                "Combustible": df_mix_vs["Producto_Upper"],
+                "Litros 2025": df_mix_vs["Litros_25"],
+                "Litros 2026": df_mix_vs["Litros_26"],
+                "Variación (%)": df_mix_vs["Variación Litros (%)"],
+                "Despachos 2025": df_mix_vs["Despachos_25"],
+                "Despachos 2026": df_mix_vs["Despachos_26"]
+            })
+
             st.dataframe(
-                df_mix_26.style.format({
-                    "Litros": fmt_litros,
-                    "Despachos": fmt_entero,
+                df_tabla_final.style.format({
+                    "Litros 2025": fmt_litros,
+                    "Litros 2026": fmt_litros,
+                    "Variación (%)": lambda x: f"{x:+.2f}%",
+                    "Despachos 2025": fmt_entero,
+                    "Despachos 2026": fmt_entero,
                 }),
                 use_container_width=True,
             )
         else:
-            st.info(f"No hay datos de 2026 cargados para {mes_seleccionado}.")
+            st.info("No hay datos suficientes para generar el comparativo de combustibles.")
 
         with st.expander("🔍 Ver transacciones detalladas completas 2026"):
             if not df_26.empty:
