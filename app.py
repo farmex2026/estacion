@@ -19,6 +19,8 @@ if "datos_2025" not in st.session_state:
     st.session_state.datos_2025 = {}
 if "datos_2026" not in st.session_state:
     st.session_state.datos_2026 = {}
+if "turnos_2025" not in st.session_state:
+    st.session_state.turnos_2025 = {}
 if "turnos_2026" not in st.session_state:
     st.session_state.turnos_2026 = {}
 if "full_2026" not in st.session_state:
@@ -101,6 +103,16 @@ def procesar_archivos_playa_detalle(archivos):
         try:
             df_raw = pd.read_excel(archivo, header=None)
             if len(df_raw) > 7:
+                if df_raw.shape[1] < 8:
+                    st.error(
+                        f"⚠️ El archivo '{archivo.name}' tiene"
+                        f" {df_raw.shape[1]} columnas y se esperaba un formato"
+                        " de Ventas Playa (mínimo 8 columnas). ¿Estás"
+                        " intentando subir un archivo de Turnos? Selecciona"
+                        " 'Ventas por Turnos' en el panel lateral."
+                    )
+                    continue
+
                 df_detalles = pd.DataFrame()
                 df_detalles["Fecha y Hora"] = df_raw.iloc[7:, 0]
                 df_detalles["Surtidor/Manguera"] = df_raw.iloc[7:, 1]
@@ -162,7 +174,7 @@ def procesar_archivos_turnos(archivos):
     return pd.DataFrame()
 
 
-def procesar_df_turnos_2026(df):
+def procesar_df_turnos(df):
     if df.empty:
         return pd.DataFrame()
 
@@ -339,19 +351,28 @@ def cargar_desde_nube(sheet_name):
 with st.sidebar.expander("🔐 Carga de Archivos por Mes", expanded=False):
     anio_carga = st.selectbox("Seleccionar Año", [2025, 2026], key="anio_c")
     mes_carga = st.selectbox("Seleccionar Mes", meses_lista, key="mes_c")
+    tipo_reg = st.selectbox(
+        "Tipo de Registro",
+        ["Ventas Playa", "Ventas por Turnos"],
+        key="tipo_reg_gen",
+    )
 
-    if anio_carga == 2025:
+    if tipo_reg == "Ventas Playa":
         archivos_sub = st.file_uploader(
-            f"Subir Ventas {mes_carga} 2025",
+            f"Subir Ventas Playa {mes_carga} {anio_carga}",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
-            key="up_25",
+            key="up_playa",
         )
         if archivos_sub:
             df_det = procesar_archivos_playa_detalle(archivos_sub)
             if not df_det.empty:
-                st.session_state.datos_2025[mes_carga] = df_det
-                sheet_name = f"{mes_carga} 2025"
+                if anio_carga == 2025:
+                    st.session_state.datos_2025[mes_carga] = df_det
+                else:
+                    st.session_state.datos_2026[mes_carga] = df_det
+
+                sheet_name = f"{mes_carga} {anio_carga}"
                 try:
                     df_nube_sub = df_det.fillna("").astype(str)
                     payload = {
@@ -363,67 +384,42 @@ with st.sidebar.expander("🔐 Carga de Archivos por Mes", expanded=False):
                 except Exception:
                     pass
                 st.success(
-                    f"¡Ventas {mes_carga} 2025 guardadas y sincronizadas!"
+                    f"¡Ventas Playa {mes_carga} {anio_carga} guardadas y"
+                    " sincronizadas!"
                 )
-
-    elif anio_carga == 2026:
-        tipo_reg_26 = st.selectbox(
-            "Tipo de Registro 2026",
-            ["Ventas Playa", "Ventas por Turnos"],
-            key="tipo_26",
+    else:
+        archivos_sub = st.file_uploader(
+            f"Subir Turnos {mes_carga} {anio_carga}",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key="up_turnos",
         )
-        if tipo_reg_26 == "Ventas Playa":
-            archivos_sub = st.file_uploader(
-                f"Subir Ventas {mes_carga} 2026",
-                type=["xlsx", "xls"],
-                accept_multiple_files=True,
-                key="up_26",
-            )
-            if archivos_sub:
-                df_det = procesar_archivos_playa_detalle(archivos_sub)
-                if not df_det.empty:
-                    st.session_state.datos_2026[mes_carga] = df_det
-                    sheet_name = f"{mes_carga} 2026"
+        if archivos_sub:
+            df_t_raw = procesar_archivos_turnos(archivos_sub)
+            if not df_t_raw.empty:
+                df_t_res = procesar_df_turnos(df_t_raw)
+                if not df_t_res.empty:
+                    if anio_carga == 2025:
+                        st.session_state.turnos_2025[mes_carga] = df_t_res
+                        sheet_t_name = f"turno{mes_carga.lower()}2025"
+                    else:
+                        st.session_state.turnos_2026[mes_carga] = df_t_res
+                        sheet_t_name = f"turno{mes_carga.lower()}2026"
+
                     try:
-                        df_nube_sub = df_det.fillna("").astype(str)
+                        df_para_nube = df_t_res.fillna("").astype(str)
                         payload = {
-                            "month": sheet_name,
-                            "headers": df_nube_sub.columns.tolist(),
-                            "rows": df_nube_sub.values.tolist(),
+                            "month": sheet_t_name,
+                            "headers": df_para_nube.columns.tolist(),
+                            "rows": df_para_nube.values.tolist(),
                         }
                         requests.post(URL_NUBE, json=payload, timeout=60)
                     except Exception:
                         pass
                     st.success(
-                        f"¡Ventas {mes_carga} 2026 guardadas y sincronizadas!"
+                        f"¡Turnos {mes_carga} {anio_carga} guardados y"
+                        " sincronizados!"
                     )
-        else:
-            archivos_sub = st.file_uploader(
-                f"Subir Turnos {mes_carga} 2026",
-                type=["xlsx", "xls"],
-                accept_multiple_files=True,
-                key="up_turnos_26",
-            )
-            if archivos_sub:
-                df_t_raw = procesar_archivos_turnos(archivos_sub)
-                if not df_t_raw.empty:
-                    df_t_res = procesar_df_turnos_2026(df_t_raw)
-                    if not df_t_res.empty:
-                        st.session_state.turnos_2026[mes_carga] = df_t_res
-                        sheet_t_name = f"turno{mes_carga.lower()}2026"
-                        try:
-                            df_para_nube = df_t_res.fillna("").astype(str)
-                            payload = {
-                                "month": sheet_t_name,
-                                "headers": df_para_nube.columns.tolist(),
-                                "rows": df_para_nube.values.tolist(),
-                            }
-                            requests.post(URL_NUBE, json=payload, timeout=60)
-                        except Exception:
-                            pass
-                        st.success(
-                            f"¡Turnos {mes_carga} 2026 guardados y sincronizados!"
-                        )
 
 
 # ==========================================
@@ -645,56 +641,74 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
 
 
 # ==========================================
-# MENÚ 2: VENTAS POR TURNOS (2026)
+# MENÚ 2: VENTAS POR TURNOS
 # ==========================================
 elif menu_principal == "🌙 Ventas por Turnos":
+    anio_turno_sel = st.selectbox(
+        "Seleccionar Año de Turnos", [2025, 2026], key="ver_anio_turno"
+    )
     st.subheader(
-        f"🌙 Control de Ventas por Turnos - {mes_seleccionado} (2026)"
+        f"🌙 Control de Ventas por Turnos - {mes_seleccionado}"
+        f" ({anio_turno_sel})"
     )
 
     if st.sidebar.button("🔄 Recargar Turnos desde la Nube"):
-        st.session_state.turnos_2026.pop(mes_seleccionado, None)
+        if anio_turno_sel == 2025:
+            st.session_state.turnos_2025.pop(mes_seleccionado, None)
+        else:
+            st.session_state.turnos_2026.pop(mes_seleccionado, None)
         st.rerun()
 
-    sheet_t_26 = f"turno{mes_seleccionado.lower()}2026"
+    sheet_t_name = f"turno{mes_seleccionado.lower()}{anio_turno_sel}"
 
-    if (
-        mes_seleccionado not in st.session_state.turnos_2026
-        or st.session_state.turnos_2026[mes_seleccionado].empty
-    ):
-        df_nube_t26 = cargar_desde_nube(sheet_t_26)
-        if not df_nube_t26.empty:
-            st.session_state.turnos_2026[mes_seleccionado] = df_nube_t26
-
-    df_t_26 = st.session_state.turnos_2026.get(
-        mes_seleccionado, pd.DataFrame()
-    )
-
-    if not df_t_26.empty:
-        df_procesado_2026 = (
-            df_t_26
-            if "Turno" in df_t_26.columns
-            else procesar_df_turnos_2026(df_t_26)
+    if anio_turno_sel == 2025:
+        if (
+            mes_seleccionado not in st.session_state.turnos_2025
+            or st.session_state.turnos_2025[mes_seleccionado].empty
+        ):
+            df_nube_t = cargar_desde_nube(sheet_t_name)
+            if not df_nube_t.empty:
+                st.session_state.turnos_2025[mes_seleccionado] = df_nube_t
+        df_t_activo = st.session_state.turnos_2025.get(
+            mes_seleccionado, pd.DataFrame()
+        )
+    else:
+        if (
+            mes_seleccionado not in st.session_state.turnos_2026
+            or st.session_state.turnos_2026[mes_seleccionado].empty
+        ):
+            df_nube_t = cargar_desde_nube(sheet_t_name)
+            if not df_nube_t.empty:
+                st.session_state.turnos_2026[mes_seleccionado] = df_nube_t
+        df_t_activo = st.session_state.turnos_2026.get(
+            mes_seleccionado, pd.DataFrame()
         )
 
-        total_litros_turnos = df_procesado_2026["TOTAL"].sum()
+    if not df_t_activo.empty:
+        df_procesado_t = (
+            df_t_activo
+            if "Turno" in df_t_activo.columns
+            else procesar_df_turnos(df_t_activo)
+        )
+
+        total_litros_turnos = df_procesado_t["TOTAL"].sum()
 
         col_t1, col_t2 = st.columns(2)
         with col_t1:
             st.metric(
-                label="⛽ Total Litros por Turnos (2026)",
+                label=f"⛽ Total Litros por Turnos ({anio_turno_sel})",
                 value=fmt_litros(total_litros_turnos),
             )
         with col_t2:
             st.metric(
                 label="🌙 Turnos Registrados",
-                value=fmt_entero(len(df_procesado_2026)),
+                value=fmt_entero(len(df_procesado_t)),
             )
 
         st.markdown("---")
         st.subheader("📊 Resumen de Ventas por Turno")
         resumen_turno = (
-            df_procesado_2026.groupby("Turno")
+            df_procesado_t.groupby("Turno")
             .agg({
                 "NAFTA SUPER": "sum",
                 "DIESEL 500": "sum",
@@ -719,7 +733,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
         with st.expander("📋 Ver detalle completo de turnos (día por día)"):
             st.dataframe(
-                df_procesado_2026.style.format({
+                df_procesado_t.style.format({
                     "NAFTA SUPER": fmt_litros,
                     "DIESEL 500": fmt_litros,
                     "INFINIA NAFTA": fmt_litros,
@@ -732,8 +746,8 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
         output_t = io.BytesIO()
         with pd.ExcelWriter(output_t, engine="openpyxl") as writer:
-            df_procesado_2026.to_excel(
-                writer, sheet_name="Turnos 2026", index=False
+            df_procesado_t.to_excel(
+                writer, sheet_name=f"Turnos {anio_turno_sel}", index=False
             )
             resumen_turno.to_excel(
                 writer, sheet_name="Resumen por Turno", index=False
@@ -742,16 +756,19 @@ elif menu_principal == "🌙 Ventas por Turnos":
         st.markdown("---")
         st.download_button(
             label=(
-                f"📥 Descargar Reporte de Turnos 2026 ({mes_seleccionado})"
+                f"📥 Descargar Reporte de Turnos {anio_turno_sel}"
+                f" ({mes_seleccionado})"
             ),
             data=output_t.getvalue(),
-            file_name=f"turnos_2026_{mes_seleccionado}.xlsx",
+            file_name=f"turnos_{anio_turno_sel}_{mes_seleccionado}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
         st.info(
             f"No hay registros de ventas por turnos cargados para el mes de"
-            f" **{mes_seleccionado}**. Sube tu archivo desde el panel lateral."
+            f" **{mes_seleccionado}** en el año **{anio_turno_sel}**. Sube tu"
+            " archivo desde el panel lateral seleccionando 'Ventas por"
+            f" Turnos' y el año {anio_turno_sel}."
         )
 
 
