@@ -188,22 +188,35 @@ def procesar_df_turnos(df):
                     return col
         return None
 
-    col_fecha = buscar_columna(["fecha", "apertura"])
-    col_super = buscar_columna(["súper", "super"])
+    col_fecha = buscar_columna(["fecha", "apertura", "día"])
+    col_super = buscar_columna(["súper", "super", "nafta super"])
     col_diesel = buscar_columna(["diesel 500", "d500", "diesel"])
     col_inf_nafta = buscar_columna(["infinia nafta", "inf. nafta"])
     col_inf_diesel = buscar_columna(["infinia diesel", "inf. diesel"])
 
     if not col_fecha and len(cols) > 0:
         col_fecha = cols[0]
+
+    # Validación inteligente para evitar tomar columnas de IDs o códigos gigantes
     if not col_super and len(cols) > 1:
-        col_super = cols[1]
+        val_prueba = limpiar_serie_numerica(df.iloc[:, 1]).mean()
+        if val_prueba < 100000:
+            col_super = cols[1]
+
     if not col_diesel and len(cols) > 2:
-        col_diesel = cols[2]
+        val_prueba = limpiar_serie_numerica(df.iloc[:, 2]).mean()
+        if val_prueba < 100000:
+            col_diesel = cols[2]
+
     if not col_inf_nafta and len(cols) > 3:
-        col_inf_nafta = cols[3]
+        val_prueba = limpiar_serie_numerica(df.iloc[:, 3]).mean()
+        if val_prueba < 100000:
+            col_inf_nafta = cols[3]
+
     if not col_inf_diesel and len(cols) > 4:
-        col_inf_diesel = cols[4]
+        val_prueba = limpiar_serie_numerica(df.iloc[:, 4]).mean()
+        if val_prueba < 100000:
+            col_inf_diesel = cols[4]
 
     fechas_raw = (
         df[col_fecha].astype(str)
