@@ -12,8 +12,8 @@ st.set_page_config(
 
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
-st.sidebar.header("☁️ Nube Automática")
-st.sidebar.success("✅ Google Sheets Sincronizado")
+st.sidebar.header("☁️ Nube Sincronizada")
+st.sidebar.success("✅ Google Sheets Conectado")
 
 if "datos_2025" not in st.session_state:
     st.session_state.datos_2025 = {}
@@ -50,21 +50,6 @@ meses_lista = [
     "Noviembre",
     "Diciembre",
 ]
-
-meses_map_num = {
-    1: "Enero",
-    2: "Febrero",
-    3: "Marzo",
-    4: "Abril",
-    5: "Mayo",
-    6: "Junio",
-    7: "Julio",
-    8: "Agosto",
-    9: "Septiembre",
-    10: "Octubre",
-    11: "Noviembre",
-    12: "Diciembre",
-}
 
 st.sidebar.markdown("---")
 st.sidebar.header("📅 Visualización de Meses")
@@ -123,7 +108,7 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles["Fecha y Hora"] = df_raw.iloc[7:, 0]
                 df_detalles["Surtidor/Manguera"] = df_raw.iloc[7:, 1]
                 df_detalles["Producto"] = df_raw.iloc[7:, 3]
-                
+
                 vol_bruto = limpiar_serie_numerica(df_raw.iloc[7:, 7])
                 df_detalles["Volumen"] = vol_bruto / 1000.0
 
@@ -153,7 +138,11 @@ def procesar_archivos_playa_detalle(archivos):
 
     if lista_dfs:
         df_concatenado = pd.concat(lista_dfs, ignore_index=True)
-        return df_concatenado.drop_duplicates().reset_index(drop=True)
+        return (
+            df_concatenado.drop(columns=["_fecha_dt"], errors="ignore")
+            .drop_duplicates()
+            .reset_index(drop=True)
+        )
     return pd.DataFrame()
 
 
@@ -179,9 +168,9 @@ def procesar_archivos_turnos(archivos):
 def procesar_df_turnos_2026(df):
     if df.empty:
         return pd.DataFrame()
-    
+
     cols = df.columns
-    
+
     def buscar_columna(nombres_posibles):
         for col in cols:
             c_low = str(col).strip().lower()
@@ -196,58 +185,114 @@ def procesar_df_turnos_2026(df):
     col_inf_nafta = buscar_columna(["infinia nafta", "inf. nafta"])
     col_inf_diesel = buscar_columna(["infinia diesel", "inf. diesel"])
 
-    if not col_fecha and len(cols) > 0: col_fecha = cols[0]
-    if not col_super and len(cols) > 1: col_super = cols[1]
-    if not col_diesel and len(cols) > 2: col_diesel = cols[2]
-    if not col_inf_nafta and len(cols) > 3: col_inf_nafta = cols[3]
-    if not col_inf_diesel and len(cols) > 4: col_inf_diesel = cols[4]
+    if not col_fecha and len(cols) > 0:
+        col_fecha = cols[0]
+    if not col_super and len(cols) > 1:
+        col_super = cols[1]
+    if not col_diesel and len(cols) > 2:
+        col_diesel = cols[2]
+    if not col_inf_nafta and len(cols) > 3:
+        col_inf_nafta = cols[3]
+    if not col_inf_diesel and len(cols) > 4:
+        col_inf_diesel = cols[4]
 
-    fechas_raw = df[col_fecha].astype(str) if col_fecha in df.columns else pd.Series([""] * len(df))
-    
+    fechas_raw = (
+        df[col_fecha].astype(str)
+        if col_fecha in df.columns
+        else pd.Series([""] * len(df))
+    )
+
     dias_map = {
-        "Mon": "Lun", "Tue": "Mar", "Wed": "Mié", "Thu": "Jue", "Fri": "Vie", "Sat": "Sáb", "Sun": "Dom",
-        "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
+        "Mon": "Lun",
+        "Tue": "Mar",
+        "Wed": "Mié",
+        "Thu": "Jue",
+        "Fri": "Vie",
+        "Sat": "Sáb",
+        "Sun": "Dom",
+        "Monday": "Lunes",
+        "Tuesday": "Martes",
+        "Wednesday": "Miércoles",
+        "Thursday": "Jueves",
+        "Friday": "Viernes",
+        "Saturday": "Sábado",
+        "Sunday": "Domingo",
     }
 
     lista_fechas = []
     lista_turnos = []
-    
+
     for val in fechas_raw:
         val_str = val.strip()
         turno = "DESCONOCIDO"
-        if "(1)" in val_str or val_str.endswith(" 1") or val_str.endswith("(1)"):
+        if (
+            "(1)" in val_str
+            or val_str.endswith(" 1")
+            or val_str.endswith("(1)")
+        ):
             turno = "TURNO NOCHE"
-        elif "(2)" in val_str or val_str.endswith(" 2") or val_str.endswith("(2)"):
+        elif (
+            "(2)" in val_str
+            or val_str.endswith(" 2")
+            or val_str.endswith("(2)")
+        ):
             turno = "TURNO MAÑANA"
-        elif "(3)" in val_str or val_str.endswith(" 3") or val_str.endswith("(3)"):
+        elif (
+            "(3)" in val_str
+            or val_str.endswith(" 3")
+            or val_str.endswith("(3)")
+        ):
             turno = "TURNO TARDE"
-            
-        fecha_limpia = re.sub(r'\s*\([123]\)', '', val_str).strip()
-        
+
+        fecha_limpia = re.sub(r"\s*\([123]\)", "", val_str).strip()
+
         for eng, esp in dias_map.items():
-            fecha_limpia = re.sub(r'\b' + eng + r'\b', esp, fecha_limpia, flags=re.IGNORECASE)
+            fecha_limpia = re.sub(
+                r"\b" + eng + r"\b", esp, fecha_limpia, flags=re.IGNORECASE
+            )
 
         lista_fechas.append(fecha_limpia)
         lista_turnos.append(turno)
 
     res = pd.DataFrame()
     res["Fecha"] = lista_fechas
-    res["NAFTA SUPER"] = limpiar_serie_numerica(df[col_super]) if col_super and col_super in df.columns else 0.0
-    res["DIESEL 500"] = limpiar_serie_numerica(df[col_diesel]) if col_diesel and col_diesel in df.columns else 0.0
-    res["INFINIA NAFTA"] = limpiar_serie_numerica(df[col_inf_nafta]) if col_inf_nafta and col_inf_nafta in df.columns else 0.0
-    res["INFINIA DIESEL"] = limpiar_serie_numerica(df[col_inf_diesel]) if col_inf_diesel and col_inf_diesel in df.columns else 0.0
-    
-    res["TOTAL"] = (
-        res["NAFTA SUPER"] 
-        + res["DIESEL 500"] 
-        + res["INFINIA NAFTA"] 
-        + res["INFINIA DIESEL"]
+    res["NAFTA SUPER"] = (
+        limpiar_serie_numerica(df[col_super])
+        if col_super and col_super in df.columns
+        else 0.0
+    )
+    res["DIESEL 500"] = (
+        limpiar_serie_numerica(df[col_diesel])
+        if col_diesel and col_diesel in df.columns
+        else 0.0
+    )
+    res["INFINIA NAFTA"] = (
+        limpiar_serie_numerica(df[col_inf_nafta])
+        if col_inf_nafta and col_inf_nafta in df.columns
+        else 0.0
+    )
+    res["INFINIA DIESEL"] = (
+        limpiar_serie_numerica(df[col_inf_diesel])
+        if col_inf_diesel and col_inf_diesel in df.columns
+        else 0.0
     )
 
+    res["TOTAL"] = (
+        res["NAFTA SUPER"]
+        + res["DIESEL 500"]
+        + res["INFINIA NAFTA"]
+        + res["INFINIA DIESEL"]
+    )
     res["Turno"] = lista_turnos
 
     if not res.empty:
-        mask_basura = res["Fecha"].astype(str).str.strip().str.lower().isin(["fecha apertura", "fecha", "apertura", "nan", ""])
+        mask_basura = (
+            res["Fecha"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .isin(["fecha apertura", "fecha", "apertura", "nan", ""])
+        )
         res = res[~mask_basura].reset_index(drop=True)
 
     return res
@@ -292,32 +337,58 @@ def cargar_desde_nube(sheet_name):
 
 
 # ==========================================
-# PANEL DE ADMINISTRACIÓN GLOBAL AUTOMÁTICO
+# PANEL DE CARGA MANUAL (AÑO 2025 o 2026)
 # ==========================================
-with st.sidebar.expander("🔐 Subir Archivos (Detección Automática)", expanded=True):
-    st.markdown("##### 📁 Archivos Ventas 2025")
-    archivos_playa_25 = st.file_uploader(
-        "Sube tus excels de 2025 (todos juntos)",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="uploader_auto_2025",
-    )
-    if archivos_playa_25:
-        df_det_25 = procesar_archivos_playa_detalle(archivos_playa_25)
-        if not df_det_25.empty:
-            df_det_25["_fecha_dt"] = pd.to_datetime(df_det_25["Fecha y Hora"], errors="coerce")
-            df_det_25["Mes_Num"] = df_det_25["_fecha_dt"].dt.month
-            
-            for mes_num, grupo in df_det_25.groupby("Mes_Num"):
-                if pd.isna(mes_num):
-                    continue
-                nombre_mes = meses_map_num.get(int(mes_num), "")
-                if nombre_mes:
-                    df_limpio = grupo.drop(columns=["_fecha_dt", "Mes_Num"], errors="ignore")
-                    st.session_state.datos_2025[nombre_mes] = df_limpio
-                    sheet_name = f"{nombre_mes} 2025"
+with st.sidebar.expander("🔐 Carga de Archivos por Mes", expanded=False):
+    anio_carga = st.selectbox("Seleccionar Año", [2025, 2026], key="anio_c")
+    mes_carga = st.selectbox("Seleccionar Mes", meses_lista, key="mes_c")
+
+    if anio_carga == 2025:
+        archivos_sub = st.file_uploader(
+            f"Subir Ventas {mes_carga} 2025",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key="up_25",
+        )
+        if archivos_sub:
+            df_det = procesar_archivos_playa_detalle(archivos_sub)
+            if not df_det.empty:
+                st.session_state.datos_2025[mes_carga] = df_det
+                sheet_name = f"{mes_carga} 2025"
+                try:
+                    df_nube_sub = df_det.fillna("").astype(str)
+                    payload = {
+                        "month": sheet_name,
+                        "headers": df_nube_sub.columns.tolist(),
+                        "rows": df_nube_sub.values.tolist(),
+                    }
+                    requests.post(URL_NUBE, json=payload, timeout=60)
+                except Exception:
+                    pass
+                st.success(
+                    f"¡Ventas {mes_carga} 2025 guardadas y sincronizadas!"
+                )
+
+    elif anio_carga == 2026:
+        tipo_reg_26 = st.selectbox(
+            "Tipo de Registro 2026",
+            ["Ventas Playa", "Ventas por Turnos"],
+            key="tipo_26",
+        )
+        if tipo_reg_26 == "Ventas Playa":
+            archivos_sub = st.file_uploader(
+                f"Subir Ventas {mes_carga} 2026",
+                type=["xlsx", "xls"],
+                accept_multiple_files=True,
+                key="up_26",
+            )
+            if archivos_sub:
+                df_det = procesar_archivos_playa_detalle(archivos_sub)
+                if not df_det.empty:
+                    st.session_state.datos_2026[mes_carga] = df_det
+                    sheet_name = f"{mes_carga} 2026"
                     try:
-                        df_nube_sub = df_limpio.fillna("").astype(str)
+                        df_nube_sub = df_det.fillna("").astype(str)
                         payload = {
                             "month": sheet_name,
                             "headers": df_nube_sub.columns.tolist(),
@@ -326,77 +397,25 @@ with st.sidebar.expander("🔐 Subir Archivos (Detección Automática)", expande
                         requests.post(URL_NUBE, json=payload, timeout=60)
                     except Exception:
                         pass
-            st.success("¡Ventas 2025 organizadas y guardadas automáticamente!")
-
-    st.markdown("---")
-    st.markdown("##### 📁 Archivos Ventas 2026")
-    archivos_playa_26 = st.file_uploader(
-        "Sube tus excels de 2026 (todos juntos)",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="uploader_auto_2026",
-    )
-    if archivos_playa_26:
-        df_det_26 = procesar_archivos_playa_detalle(archivos_playa_26)
-        if not df_det_26.empty:
-            df_det_26["_fecha_dt"] = pd.to_datetime(df_det_26["Fecha y Hora"], errors="coerce")
-            df_det_26["Mes_Num"] = df_det_26["_fecha_dt"].dt.month
-            
-            for mes_num, grupo in df_det_26.groupby("Mes_Num"):
-                if pd.isna(mes_num):
-                    continue
-                nombre_mes = meses_map_num.get(int(mes_num), "")
-                if nombre_mes:
-                    df_limpio = grupo.drop(columns=["_fecha_dt", "Mes_Num"], errors="ignore")
-                    st.session_state.datos_2026[nombre_mes] = df_limpio
-                    sheet_name = f"{nombre_mes} 2026"
-                    try:
-                        df_nube_sub = df_limpio.fillna("").astype(str)
-                        payload = {
-                            "month": sheet_name,
-                            "headers": df_nube_sub.columns.tolist(),
-                            "rows": df_nube_sub.values.tolist(),
-                        }
-                        requests.post(URL_NUBE, json=payload, timeout=60)
-                    except Exception:
-                        pass
-            st.success("¡Ventas 2026 organizadas y guardadas automáticamente!")
-
-    st.markdown("---")
-    st.markdown("##### 🌙 Archivos Turnos 2026")
-    archivos_turnos = st.file_uploader(
-        "Sube tus excels de Turnos (todos juntos)",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="uploader_auto_turnos",
-    )
-    if archivos_turnos:
-        df_turnos_proc = procesar_archivos_turnos(archivos_turnos)
-        if not df_turnos_proc.empty:
-            df_t_res = procesar_df_turnos_2026(df_turnos_proc)
-            if not df_t_res.empty:
-                def extraer_mes_turno(val_str):
-                    s = str(val_str).lower()
-                    for m_nombre, m_num in meses_map_num.items():
-                        if m_nombre.lower() in s:
-                            return m_num
-                    dt = pd.to_datetime(val_str, errors="coerce", dayfirst=True)
-                    if pd.notna(dt):
-                        return dt.month
-                    return None
-
-                df_t_res["_mes_detectado"] = df_t_res["Fecha"].apply(extraer_mes_turno)
-
-                for mes_num, grupo in df_t_res.groupby("_mes_detectado"):
-                    if pd.isna(mes_num):
-                        continue
-                    nombre_mes = meses_map_num.get(int(mes_num), "")
-                    if nombre_mes:
-                        df_limpio = grupo.drop(columns=["_mes_detectado"], errors="ignore")
-                        st.session_state.turnos_2026[nombre_mes] = df_limpio
-                        sheet_t_name = f"turno{nombre_mes.lower()}2026"
+                    st.success(
+                        f"¡Ventas {mes_carga} 2026 guardadas y sincronizadas!"
+                    )
+        else:
+            archivos_sub = st.file_uploader(
+                f"Subir Turnos {mes_carga} 2026",
+                type=["xlsx", "xls"],
+                accept_multiple_files=True,
+                key="up_turnos_26",
+            )
+            if archivos_sub:
+                df_t_raw = procesar_archivos_turnos(archivos_sub)
+                if not df_t_raw.empty:
+                    df_t_res = procesar_df_turnos_2026(df_t_raw)
+                    if not df_t_res.empty:
+                        st.session_state.turnos_2026[mes_carga] = df_t_res
+                        sheet_t_name = f"turno{mes_carga.lower()}2026"
                         try:
-                            df_para_nube = df_limpio.fillna("").astype(str)
+                            df_para_nube = df_t_res.fillna("").astype(str)
                             payload = {
                                 "month": sheet_t_name,
                                 "headers": df_para_nube.columns.tolist(),
@@ -405,7 +424,9 @@ with st.sidebar.expander("🔐 Subir Archivos (Detección Automática)", expande
                             requests.post(URL_NUBE, json=payload, timeout=60)
                         except Exception:
                             pass
-                st.success("¡Turnos organizados y guardados automáticamente por mes!")
+                        st.success(
+                            f"¡Turnos {mes_carga} 2026 guardados y sincronizados!"
+                        )
 
 
 # ==========================================
@@ -445,7 +466,10 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         )
 
         if df_25.empty:
-            st.info(f"ℹ️ Mostrando datos de **2026**. No hay registros cargados de **2025** para el mes de {mes_seleccionado}.")
+            st.info(
+                f"ℹ️ Mostrando datos de **2026**. No hay registros cargados"
+                f" de **2025** para el mes de {mes_seleccionado}."
+            )
 
         litros_25 = df_25["Volumen"].sum() if not df_25.empty else 0.0
         litros_26 = df_26["Volumen"].sum() if not df_26.empty else 0.0
@@ -479,13 +503,22 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
             st.metric(
                 label="⛽ Total Litros Vendidos (2026)",
                 value=fmt_litros(litros_26),
-                delta=f"{pct_litros:+.2f}% respecto a 2025 ({fmt_litros(litros_25)})" if not df_25.empty else "Sin datos 2025",
+                delta=(
+                    f"{pct_litros:+.2f}% respecto a 2025"
+                    f" ({fmt_litros(litros_25)})"
+                    if not df_25.empty
+                    else "Sin datos 2025"
+                ),
             )
         with col_m2:
             st.metric(
                 label="🧾 Total de Despachos (2026)",
                 value=fmt_entero(desp_26),
-                delta=f"{pct_desp:+.2f}% respecto a 2025 ({fmt_entero(desp_25)})" if not df_25.empty else "Sin datos 2025",
+                delta=(
+                    f"{pct_desp:+.2f}% respecto a 2025 ({fmt_entero(desp_25)})"
+                    if not df_25.empty
+                    else "Sin datos 2025"
+                ),
             )
 
         st.markdown("---")
@@ -609,7 +642,8 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
     else:
         st.info(
             f"No hay registros cargados ni para 2025 ni para 2026 en el mes de"
-            f" **{mes_seleccionado}**. Sube tus archivos en el panel de la izquierda."
+            f" **{mes_seleccionado}**. Sube tus archivos en el panel lateral"
+            " 'Carga de Archivos por Mes'."
         )
 
 
@@ -636,7 +670,11 @@ elif menu_principal == "🌙 Ventas por Turnos":
     df_t_26 = st.session_state.turnos_2026.get(mes_turno, pd.DataFrame())
 
     if not df_t_26.empty:
-        df_procesado_2026 = procesar_df_turnos_2026(df_t_26)
+        df_procesado_2026 = (
+            df_t_26
+            if "Turno" in df_t_26.columns
+            else procesar_df_turnos_2026(df_t_26)
+        )
 
         total_litros_turnos = df_procesado_2026["TOTAL"].sum()
 
@@ -644,23 +682,27 @@ elif menu_principal == "🌙 Ventas por Turnos":
         with col_t1:
             st.metric(
                 label="⛽ Total Litros por Turnos (2026)",
-                value=fmt_litros(total_litros_turnos)
+                value=fmt_litros(total_litros_turnos),
             )
         with col_t2:
             st.metric(
                 label="🌙 Turnos Registrados",
-                value=fmt_entero(len(df_procesado_2026))
+                value=fmt_entero(len(df_procesado_2026)),
             )
 
         st.markdown("---")
         st.subheader("📊 Resumen de Ventas por Turno")
-        resumen_turno = df_procesado_2026.groupby("Turno").agg({
-            "NAFTA SUPER": "sum",
-            "DIESEL 500": "sum",
-            "INFINIA NAFTA": "sum",
-            "INFINIA DIESEL": "sum",
-            "TOTAL": "sum"
-        }).reset_index()
+        resumen_turno = (
+            df_procesado_2026.groupby("Turno")
+            .agg({
+                "NAFTA SUPER": "sum",
+                "DIESEL 500": "sum",
+                "INFINIA NAFTA": "sum",
+                "INFINIA DIESEL": "sum",
+                "TOTAL": "sum",
+            })
+            .reset_index()
+        )
 
         st.dataframe(
             resumen_turno.style.format({
@@ -689,8 +731,12 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
         output_t = io.BytesIO()
         with pd.ExcelWriter(output_t, engine="openpyxl") as writer:
-            df_procesado_2026.to_excel(writer, sheet_name="Turnos 2026", index=False)
-            resumen_turno.to_excel(writer, sheet_name="Resumen por Turno", index=False)
+            df_procesado_2026.to_excel(
+                writer, sheet_name="Turnos 2026", index=False
+            )
+            resumen_turno.to_excel(
+                writer, sheet_name="Resumen por Turno", index=False
+            )
 
         st.markdown("---")
         st.download_button(
@@ -701,7 +747,8 @@ elif menu_principal == "🌙 Ventas por Turnos":
         )
     else:
         st.info(
-            f"No hay registros de ventas por turnos cargados para el mes de **{mes_turno}**. Sube tus archivos en el panel de la izquierda."
+            f"No hay registros de ventas por turnos cargados para el mes de"
+            f" **{mes_turno}**. Sube tu archivo desde el panel lateral."
         )
 
 
@@ -729,7 +776,7 @@ elif menu_principal == "📦 BOXES":
         st.info("No hay información de BOXES disponible.")
 
 # ==========================================
-# PIE DE PÁGINA DE LA BARRA LATERAL
+# PIE DE PÁGINA
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.markdown(
