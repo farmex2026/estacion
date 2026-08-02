@@ -608,7 +608,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
         df_turnos_vs["Mix_25"] = df_turnos_vs.apply(lambda r: (r["Litros_25"] / tot_litros_25 * 100) if tot_litros_25 > 0 else 0.0, axis=1)
         df_turnos_vs["Mix_26"] = df_turnos_vs.apply(lambda r: (r["Litros_26"] / tot_litros_26 * 100) if tot_litros_26 > 0 else 0.0, axis=1)
-        df_turnos_vs["Variación (%)"] = df_turnos_vs.apply(lambda r: ((r["Litros_26"] - r["Litros_25"]) / r["Litros_25'] * 100) if r["Litros_25"] > 0 else 0.0, axis=1)
+        df_turnos_vs["Variación (%)"] = df_turnos_vs.apply(lambda r: ((r["Litros_26"] - r["Litros_25"]) / r["Litros_25"] * 100) if r["Litros_25"] > 0 else 0.0, axis=1)
 
         df_tabla_turnos_final = pd.DataFrame({
             "Turno": df_turnos_vs["Turno"],
