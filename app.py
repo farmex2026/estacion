@@ -405,14 +405,14 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                 axis=1,
             )
 
-            # Columnas ordenadas: Litros 2025 al lado de Litros 2026, Mix 2025 al lado de Mix 2026
+            # Columnas ordenadas: Litros 2025, Litros 2026, Variación, Mix 2025, Mix 2026, Despachos
             df_tabla_final = pd.DataFrame({
                 "Combustible": df_mix_vs["Producto_Upper"],
                 "Litros 2025": df_mix_vs["Litros_25"],
                 "Litros 2026": df_mix_vs["Litros_26"],
+                "Variación (%)": df_mix_vs["Variación Litros (%)"],
                 "Mix 2025": df_mix_vs["Mix_25"],
                 "Mix 2026": df_mix_vs["Mix_26"],
-                "Variación (%)": df_mix_vs["Variación Litros (%)"],
                 "Despachos 2025": df_mix_vs["Despachos_25"],
                 "Despachos 2026": df_mix_vs["Despachos_26"],
             })
@@ -421,9 +421,9 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                 df_tabla_final.style.format({
                     "Litros 2025": fmt_litros,
                     "Litros 2026": fmt_litros,
+                    "Variación (%)": lambda x: f"{x:+.2f}%",
                     "Mix 2025": lambda x: f"{x:.2f}%",
                     "Mix 2026": lambda x: f"{x:.2f}%",
-                    "Variación (%)": lambda x: f"{x:+.2f}%",
                     "Despachos 2025": fmt_entero,
                     "Despachos 2026": fmt_entero,
                 }),
