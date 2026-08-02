@@ -393,13 +393,12 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                     "Despachos 2026": fmt_entero,
                 }),
                 use_container_width=True,
+                hide_index=True,
             )
 
         with st.expander("🔍 Ver transacciones detalladas completas 2026"):
             if not df_26.empty:
-                df_display = df_26.copy()
-                df_display.index = df_display.index + 1
-                st.dataframe(df_display, use_container_width=True)
+                st.dataframe(df_26, use_container_width=True, hide_index=True)
             else:
                 st.warning("No hay transacciones de 2026 para mostrar.")
 
@@ -520,9 +519,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
                     )
             st.markdown("---")
 
-        df_display_t = df_t.copy()
-        df_display_t.index = df_display_t.index + 1
-        st.dataframe(df_display_t, use_container_width=True)
+        st.dataframe(df_t, use_container_width=True, hide_index=True)
 
         output_t = io.BytesIO()
         with pd.ExcelWriter(output_t, engine="openpyxl") as writer:
@@ -548,7 +545,7 @@ elif menu_principal == "🛒 Tienda Full":
     st.subheader("🛒 Gestión y Ventas - Tienda Full")
     df_f_activo = st.session_state.full_2026.get("general", pd.DataFrame())
     if not df_f_activo.empty:
-        st.dataframe(df_f_activo, use_container_width=True)
+        st.dataframe(df_f_activo, use_container_width=True, hide_index=True)
     else:
         st.info("No hay información de Tienda Full disponible.")
 
@@ -560,7 +557,7 @@ elif menu_principal == "📦 BOXES":
     st.subheader("📦 Control de Servicios - BOXES")
     df_b_activo = st.session_state.boxes_2026.get("general", pd.DataFrame())
     if not df_b_activo.empty:
-        st.dataframe(df_b_activo, use_container_width=True)
+        st.dataframe(df_b_activo, use_container_width=True, hide_index=True)
     else:
         st.info("No hay información de BOXES disponible.")
 
