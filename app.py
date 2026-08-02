@@ -297,12 +297,11 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                     sheet_name_target = sheet_26
 
                 try:
+                    df_detalle_nube = df_detalle_procesado.fillna("").astype(str)
                     payload = {
                         "month": sheet_name_target,
-                        "headers": df_detalle_procesado.columns.tolist(),
-                        "rows": df_detalle_procesado.astype(
-                            str
-                        ).values.tolist(),
+                        "headers": df_detalle_nube.columns.tolist(),
+                        "rows": df_detalle_nube.values.tolist(),
                     }
                     requests.post(URL_NUBE, json=payload, timeout=60)
                     st.success(
@@ -503,8 +502,9 @@ elif menu_principal == "🌙 Ventas por Turnos":
         st.session_state.turnos_2026.pop(mes_turno, None)
         st.rerun()
 
-    sheet_t_25 = f"Turnos {mes_turno} 2025"
-    sheet_t_26 = f"Turnos {mes_turno} 2026"
+    # Nombres de solapa sin espacios personalizados (ej: turnojulio2025)
+    sheet_t_25 = f"turno{mes_turno.lower()}2025"
+    sheet_t_26 = f"turno{mes_turno.lower()}2026"
 
     if (
         mes_turno not in st.session_state.turnos_2025
@@ -542,10 +542,11 @@ elif menu_principal == "🌙 Ventas por Turnos":
                     sheet_target_t = sheet_t_26
 
                 try:
+                    df_para_nube = df_turnos_proc.fillna("").astype(str)
                     payload = {
                         "month": sheet_target_t,
-                        "headers": df_turnos_proc.columns.tolist(),
-                        "rows": df_turnos_proc.astype(str).values.tolist(),
+                        "headers": df_para_nube.columns.tolist(),
+                        "rows": df_para_nube.values.tolist(),
                     }
                     requests.post(URL_NUBE, json=payload, timeout=60)
                     st.success(
@@ -607,7 +608,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
 
         df_turnos_vs["Mix_25"] = df_turnos_vs.apply(lambda r: (r["Litros_25"] / tot_litros_25 * 100) if tot_litros_25 > 0 else 0.0, axis=1)
         df_turnos_vs["Mix_26"] = df_turnos_vs.apply(lambda r: (r["Litros_26"] / tot_litros_26 * 100) if tot_litros_26 > 0 else 0.0, axis=1)
-        df_turnos_vs["Variación (%)"] = df_turnos_vs.apply(lambda r: ((r["Litros_26"] - r["Litros_25"]) / r["Litros_25"] * 100) if r["Litros_25"] > 0 else 0.0, axis=1)
+        df_turnos_vs["Variación (%)"] = df_turnos_vs.apply(lambda r: ((r["Litros_26"] - r["Litros_25"]) / r["Litros_25'] * 100) if r["Litros_25"] > 0 else 0.0, axis=1)
 
         df_tabla_turnos_final = pd.DataFrame({
             "Turno": df_turnos_vs["Turno"],
