@@ -97,42 +97,117 @@ def procesar_archivos_playa_detalle(archivos):
     lista_dfs = []
     for archivo in archivos:
         try:
+            # Leer sin cabecera para buscar automáticamente dónde están los nombres de las columnas
             df_raw = pd.read_excel(archivo, header=None)
-            if len(df_raw) > 7:
-                df_detalles = pd.DataFrame()
-                df_detalles["Fecha y Hora"] = df_raw.iloc[7:, 0]
-                df_detalles["Surtidor/Manguera"] = df_raw.iloc[7:, 1]
-                df_detalles["Producto"] = df_raw.iloc[7:, 3]
-                # CORREGIDO: Columna 6 es Volumen y Columna 7 es Monto
-                df_detalles["Volumen"] = limpiar_serie_numerica(
-                    df_raw.iloc[7:, 6]
+            header_idx = None
+            for i in range(min(15, len(df_raw))):
+                texto_fila = (
+                    " ".join(df_raw.iloc[i].astype(str).values).lower()
                 )
-                df_detalles["Monto"] = limpiar_serie_numerica(
-                    df_raw.iloc[7:, 7]
-                )
+                if "producto" in texto_fila and (
+                    "vol" in texto_fila
+                    or "litro" in texto_fila
+                    or "monto" in texto_fila
+                    or "fecha" in texto_fila
+                ):
+                    header_idx = i
+                    break
 
-                df_detalles = df_detalles.dropna(
-                    subset=["Producto", "Volumen"], how="all"
-                )
-                df_detalles["_fecha_dt"] = pd.to_datetime(
-                    df_detalles["Fecha y Hora"], errors="coerce"
-                )
-                df_detalles = df_detalles.dropna(subset=["_fecha_dt"])
-                df_detalles = df_detalles.drop(columns=["_fecha_dt"])
+            if header_idx is not None:
+                df = pd.read_excel(archivo, header=header_idx)
+            else:
+                df = pd.read_excel(archivo, header=7)
 
-                mask_totales = (
-                    df_detalles["Fecha y Hora"]
-                    .astype(str)
-                    .str.upper()
-                    .str.contains("TOTAL|SUMA|SUBTOTAL", na=False)
-                ) | (
-                    df_detalles["Producto"]
-                    .astype(str)
-                    .str.upper()
-                    .str.contains("TOTAL|SUMA|SUBTOTAL", na=False)
-                )
-                df_detalles = df_detalles[~mask_totales]
-                lista_dfs.append(df_detalles)
+            df.columns = [str(c).strip() for c in df.columns]
+            cols_lower = {str(c).lower(): c for c in df.columns}
+
+            # Buscar columnas por nombres clave de forma flexible
+            col_fecha = next(
+                (
+                    orig
+                    for low, orig in cols_lower.items()
+                    if "fecha" in low or "hora" in low
+                ),
+                None,
+            )
+            col_prod = next(
+                (
+                    orig
+                    for low, orig in cols_lower.items()
+                    if "producto" in low or "combustible" in low
+                ),
+                None,
+            )
+            col_vol = next(
+                (
+                    orig
+                    for low, orig in cols_lower.items()
+                    if "vol" in low or "litro" in low
+                ),
+                None,
+            )
+            col_monto = next(
+                (
+                    orig
+                    for low, orig in cols_lower.items()
+                    if "monto" in low
+                    or "total" in low
+                    or "importe" in low
+                    or "pesos" in low
+                ),
+                None,
+            )
+
+            # Respaldos por posición si no encuentra los nombres exactos
+            if not col_fecha and len(df.columns) > 0:
+                col_fecha = df.columns[0]
+            if not col_prod and len(df.columns) > 3:
+                col_prod = df.columns[3]
+            if not col_vol and len(df.columns) > 7:
+                col_vol = df.columns[7]
+            elif not col_vol and len(df.columns) > 6:
+                col_vol = df.columns[6]
+            if not col_monto and len(df.columns) > 6:
+                col_monto = df.columns[6]
+            elif not col_monto and len(df.columns) > 7:
+                col_monto = df.columns[7]
+
+            df_detalles = pd.DataFrame()
+            df_detalles["Fecha y Hora"] = (
+                df[col_fecha] if col_fecha else df.iloc[:, 0]
+            )
+            df_detalles["Producto"] = (
+                df[col_prod] if col_prod else df.iloc[:, 3]
+            )
+            df_detalles["Volumen"] = limpiar_serie_numerica(
+                df[col_vol] if col_vol else df.iloc[:, 6]
+            )
+            df_detalles["Monto"] = limpiar_serie_numerica(
+                df[col_monto] if col_monto else df.iloc[:, 7]
+            )
+
+            df_detalles = df_detalles.dropna(
+                subset=["Producto", "Volumen"], how="all"
+            )
+            df_detalles["_fecha_dt"] = pd.to_datetime(
+                df_detalles["Fecha y Hora"], errors="coerce"
+            )
+            df_detalles = df_detalles.dropna(subset=["_fecha_dt"])
+            df_detalles = df_detalles.drop(columns=["_fecha_dt"])
+
+            mask_totales = (
+                df_detalles["Fecha y Hora"]
+                .astype(str)
+                .str.upper()
+                .str.contains("TOTAL|SUMA|SUBTOTAL", na=False)
+            ) | (
+                df_detalles["Producto"]
+                .astype(str)
+                .str.upper()
+                .str.contains("TOTAL|SUMA|SUBTOTAL", na=False)
+            )
+            df_detalles = df_detalles[~mask_totales]
+            lista_dfs.append(df_detalles)
         except Exception as e:
             st.warning(f"Aviso al procesar {archivo.name}: {e}")
 
