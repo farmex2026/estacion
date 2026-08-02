@@ -139,7 +139,7 @@ def procesar_generico(archivos):
     return pd.DataFrame()
 
 
-# Botones de Sincronización Automática con la Nube (Google Sheets)
+# Botones de Sincronización Automática con la Nube (Google Sheets por Mes)
 col_n1, col_n2 = st.sidebar.columns(2)
 with col_n1:
     if st.button("💾 Guardar"):
@@ -150,31 +150,36 @@ with col_n1:
             )
             if not df_a_guardar.empty:
                 payload = {
+                    "month": mes_act,
                     "headers": df_a_guardar.columns.tolist(),
                     "rows": df_a_guardar.astype(str).values.tolist(),
                 }
                 requests.post(URL_NUBE, json=payload)
-                st.sidebar.success("¡Guardado en Google Sheets!")
+                st.sidebar.success(f"¡Guardado en Google Sheets ({mes_act})!")
             else:
-                st.sidebar.warning("No hay datos cargados para guardar.")
+                st.sidebar.warning(f"No hay datos cargados para {mes_act}.")
         except Exception as e:
             st.sidebar.error(f"Error: {e}")
 
 with col_n2:
     if st.button("🔄 Cargar"):
         try:
-            resp = requests.get(URL_NUBE)
+            mes_act = st.session_state.get("mes_trabajo", "Enero")
+            resp = requests.get(f"{URL_NUBE}?month={mes_act}")
             data = resp.json()
             if data and len(data) > 1:
                 headers = data[0]
                 rows = data[1:]
                 df_recuperado = pd.DataFrame(rows, columns=headers)
-                mes_act = st.session_state.get("mes_trabajo", "Enero")
                 st.session_state.datos_2026[mes_act] = df_recuperado
-                st.sidebar.success("¡Datos recuperados de Google Sheets!")
+                st.sidebar.success(
+                    f"¡Datos de {mes_act} recuperados con éxito!"
+                )
                 st.rerun()
             else:
-                st.sidebar.info("La planilla está vacía.")
+                st.sidebar.warning(
+                    f"No hay datos en la nube para el mes de {mes_act}."
+                )
         except Exception as e:
             st.sidebar.error(f"Error: {e}")
 
@@ -267,7 +272,7 @@ if menu_principal == "Ventas 2026":
         )
     else:
         st.info(
-            f"👈 Sube tus archivos Excel en la barra lateral para comenzar con **{mes_seleccionado}**."
+            f"👈 Sube tus archivos Excel en la barra lateral para comenzar con **{mes_seleccionado}** o haz clic en '🔄 Cargar'."
         )
 
 
