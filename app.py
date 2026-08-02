@@ -13,7 +13,7 @@ st.set_page_config(
 st.sidebar.markdown("---")
 st.sidebar.markdown("🛠️ **Creado por Lucas-Farmex 2026**")
 
-URL_NUBE = "https://script.google.com/macros/s/AKfycbzWUhKmI38g4L-YhJj-BReIUVsnXrm8GYD9yo26ebR9S45htkaX7xCX0USLtZS376PL/exec"
+URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
 st.sidebar.markdown("---")
 st.sidebar.header("☁️ Nube Automática")
