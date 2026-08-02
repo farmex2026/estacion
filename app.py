@@ -306,21 +306,34 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         diff_desp = desp_26 - desp_25
         pct_desp = ((diff_desp / desp_25 * 100) if desp_25 > 0 else 0.0)
 
+        # Mensaje aclaratorio destacado para lectura rápida y sin confusiones
+        if litros_25 > litros_26:
+            st.info(
+                f"💡 **Lectura de ventas ({mes_seleccionado}):** Se vendió"
+                f" **más en 2025** ({fmt_litros(litros_25)}) que en **2026**"
+                f" ({fmt_litros(litros_26)}). La variación es de"
+                f" **{pct_litros:+.2f}%**."
+            )
+        elif litros_26 > litros_25:
+            st.success(
+                f"💡 **Lectura de ventas ({mes_seleccionado}):** Se vendió"
+                f" **más en 2026** ({fmt_litros(litros_26)}) que en **2025**"
+                f" ({fmt_litros(litros_25)}). La variación es de"
+                f" **{pct_litros:+.2f}%**."
+            )
+
         col_m1, col_m2 = st.columns(2)
         with col_m1:
             st.metric(
-                label="⛽ Total Litros Vendidos",
-                value=f"2026: {fmt_litros(litros_26)}",
-                delta=(
-                    f"vs 2025 ({fmt_litros(litros_25)}) ->"
-                    f" {pct_litros:+.2f}%"
-                ),
+                label="⛽ Total Litros Vendidos (2026)",
+                value=fmt_litros(litros_26),
+                delta=f"{pct_litros:+.2f}% respecto a 2025 ({fmt_litros(litros_25)})",
             )
         with col_m2:
             st.metric(
-                label="🧾 Total de Despachos",
-                value=f"2026: {fmt_entero(desp_26)}",
-                delta=f"vs 2025 ({fmt_entero(desp_25)}) -> {pct_desp:+.2f}%",
+                label="🧾 Total de Despachos (2026)",
+                value=fmt_entero(desp_26),
+                delta=f"{pct_desp:+.2f}% respecto a 2025 ({fmt_entero(desp_25)})",
             )
 
         st.markdown("---")
