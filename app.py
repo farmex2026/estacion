@@ -103,10 +103,11 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles["Fecha y Hora"] = df_raw.iloc[7:, 0]
                 df_detalles["Surtidor/Manguera"] = df_raw.iloc[7:, 1]
                 df_detalles["Producto"] = df_raw.iloc[7:, 3]
-                df_detalles["Monto"] = limpiar_serie_numerica(
+                # CORREGIDO: Columna 6 es Volumen y Columna 7 es Monto
+                df_detalles["Volumen"] = limpiar_serie_numerica(
                     df_raw.iloc[7:, 6]
                 )
-                df_detalles["Volumen"] = limpiar_serie_numerica(
+                df_detalles["Monto"] = limpiar_serie_numerica(
                     df_raw.iloc[7:, 7]
                 )
 
