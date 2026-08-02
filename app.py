@@ -139,7 +139,8 @@ def procesar_archivos_playa_detalle(archivos):
 def cargar_desde_nube(mes, anio):
     sheet_name = f"{mes} {anio}"
     try:
-        resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=10)
+        # Aumentado el timeout a 60 segundos para evitar cortes
+        resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=60)
 
         if resp.status_code != 200:
             st.error(f"Error HTTP {resp.status_code} al conectar con Google.")
@@ -244,7 +245,8 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                             str
                         ).values.tolist(),
                     }
-                    requests.post(URL_NUBE, json=payload, timeout=5)
+                    # Timeout aumentado a 60s también para la subida
+                    requests.post(URL_NUBE, json=payload, timeout=60)
                     st.success(
                         f"¡Subido y guardado en la nube ({sheet_name}) con"
                         " éxito!"
