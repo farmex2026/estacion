@@ -187,7 +187,7 @@ def procesar_df_turnos_2026(df):
         col_inf_diesel = cols[4]
 
     fechas_raw = (
-        df[col_fecha].astype(str)
+        df[col_fecha]
         if col_fecha in df.columns
         else pd.Series([""] * len(df))
     )
@@ -213,7 +213,10 @@ def procesar_df_turnos_2026(df):
     lista_turnos = []
 
     for val in fechas_raw:
-        val_str = val.strip()
+        val_str = str(val).strip() if pd.notna(val) else ""
+        if val_str.lower() in ["nan", "nat", "none"]:
+            val_str = ""
+
         turno = "DESCONOCIDO"
         if (
             "(1)" in val_str
@@ -695,7 +698,6 @@ elif menu_principal == "🌙 Ventas por Turnos":
         " vs 2026)"
     )
 
-    # Indicadores de estado de carga
     col_st1, col_st2 = st.columns(2)
     with col_st1:
         if not df_t_25.empty:
