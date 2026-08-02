@@ -4,20 +4,27 @@ def procesar_df_turnos_2026(df):
     
     cols = df.columns
     
-    def get_col(idx, possible_names):
-        if idx < len(cols):
-            return cols[idx]
-        for name in possible_names:
-            matches = [c for c in cols if name.lower() in str(c).lower()]
-            if matches:
-                return matches[0]
-        return cols[idx] if idx < len(cols) else None
+    def buscar_columna(nombres_posibles):
+        for col in cols:
+            c_low = str(col).strip().lower()
+            for nombre in nombres_posibles:
+                if nombre in c_low:
+                    return col
+        return None
 
-    col_fecha = get_col(0, ["fecha", "apertura"])
-    col_super = get_col(1, ["nafta super", "super"])
-    col_diesel = get_col(2, ["diesel 500", "d500", "diesel"])
-    col_inf_nafta = get_col(3, ["infinia nafta"])
-    col_inf_diesel = get_col(4, ["infinia diesel"])
+    # Identificar columnas por texto clave
+    col_fecha = buscar_columna(["fecha", "apertura"])
+    col_super = buscar_columna(["súper", "super"])
+    col_diesel = buscar_columna(["diesel 500", "d500", "diesel 500"])
+    col_inf_nafta = buscar_columna(["infinia nafta", "inf. nafta"])
+    col_inf_diesel = buscar_columna(["infinia diesel", "inf. diesel"])
+
+    # Si no encuentra por nombre exacto, usa los índices por defecto como respaldo
+    if not col_fecha and len(cols) > 0: col_fecha = cols[0]
+    if not col_super and len(cols) > 1: col_super = cols[1]
+    if not col_diesel and len(cols) > 2: col_diesel = cols[2]
+    if not col_inf_nafta and len(cols) > 3: col_inf_nafta = cols[3]
+    if not col_inf_diesel and len(cols) > 4: col_inf_diesel = cols[4]
 
     fechas_raw = df[col_fecha].astype(str) if col_fecha in df.columns else pd.Series([""] * len(df))
     
@@ -40,12 +47,12 @@ def procesar_df_turnos_2026(df):
 
     res = pd.DataFrame()
     res["Fecha"] = lista_fechas
-    res["NAFTA SUPER"] = limpiar_serie_numerica(df[col_super]) if col_super in df.columns else 0.0
-    res["DIESEL 500"] = limpiar_serie_numerica(df[col_diesel]) if col_diesel in df.columns else 0.0
-    res["INFINIA NAFTA"] = limpiar_serie_numerica(df[col_inf_nafta]) if col_inf_nafta in df.columns else 0.0
-    res["INFINIA DIESEL"] = limpiar_serie_numerica(df[col_inf_diesel]) if col_inf_diesel in df.columns else 0.0
+    res["NAFTA SUPER"] = limpiar_serie_numerica(df[col_super]) if col_super and col_super in df.columns else 0.0
+    res["DIESEL 500"] = limpiar_serie_numerica(df[col_diesel]) if col_diesel and col_diesel in df.columns else 0.0
+    res["INFINIA NAFTA"] = limpiar_serie_numerica(df[col_inf_nafta]) if col_inf_nafta and col_inf_nafta in df.columns else 0.0
+    res["INFINIA DIESEL"] = limpiar_serie_numerica(df[col_inf_diesel]) if col_inf_diesel and col_inf_diesel in df.columns else 0.0
     
-    # Forzar el cálculo automático sumando todos los productos
+    # Cálculo automático y seguro de la suma total
     res["TOTAL"] = (
         res["NAFTA SUPER"] 
         + res["DIESEL 500"] 
