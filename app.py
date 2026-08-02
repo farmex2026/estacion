@@ -24,16 +24,12 @@ url_nube = st.sidebar.text_input(
 # Inicialización de Estados Globales estructurados por Mes
 if "datos_2026" not in st.session_state:
     st.session_state.datos_2026 = {}
-if "datos_2025" not in st.session_state:
-    st.session_state.datos_2025 = {}
 if "turnos_2026" not in st.session_state:
     st.session_state.turnos_2026 = {}
-if "turnos_2025" not in st.session_state:
-    st.session_state.turnos_2025 = {}
-if "full_global" not in st.session_state:
-    st.session_state.full_global = {}
-if "boxes_global" not in st.session_state:
-    st.session_state.boxes_global = {}
+if "full_2026" not in st.session_state:
+    st.session_state.full_2026 = {}
+if "boxes_2026" not in st.session_state:
+    st.session_state.boxes_2026 = {}
 
 menu_principal = st.sidebar.selectbox(
     "📂 Menú Principal",
@@ -56,6 +52,7 @@ meses_lista = [
 ]
 
 
+# Funciones de Formato Estilo Argentino
 def fmt_litros(val):
     if pd.isna(val):
         return "0,00 L"
@@ -63,6 +60,15 @@ def fmt_litros(val):
     enteros = partes[0].replace(",", ".")
     decimales = partes[1]
     return f"{enteros},{decimales} L"
+
+
+def fmt_pesos(val):
+    if pd.isna(val):
+        return "$ 0,00"
+    partes = f"{val:,.2f}".split(".")
+    enteros = partes[0].replace(",", ".")
+    decimales = partes[1]
+    return f"$ {enteros},{decimales}"
 
 
 def fmt_entero(val):
@@ -80,6 +86,7 @@ def fmt_porcentaje(val):
     return f"{enteros},{decimales}%"
 
 
+# Funciones de Procesamiento Genéricas
 def procesar_archivos_playa_detalle(archivos):
     lista_dfs = []
     for archivo in archivos:
@@ -102,7 +109,6 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles = df_detalles.dropna(
                     subset=["Producto", "Volumen"], how="all"
                 )
-
                 df_detalles["_fecha_dt"] = pd.to_datetime(
                     df_detalles["Fecha y Hora"], errors="coerce"
                 )
@@ -121,27 +127,36 @@ def procesar_archivos_playa_detalle(archivos):
                     .str.contains("TOTAL|SUMA|SUBTOTAL", na=False)
                 )
                 df_detalles = df_detalles[~mask_totales]
-
                 lista_dfs.append(df_detalles)
         except Exception as e:
             st.warning(f"Aviso al procesar {archivo.name}: {e}")
 
     if lista_dfs:
         df_concatenado = pd.concat(lista_dfs, ignore_index=True)
-        df_concatenado = df_concatenado.drop_duplicates().reset_index(
-            drop=True
-        )
-        return df_concatenado
+        return df_concatenado.drop_duplicates().reset_index(drop=True)
     return pd.DataFrame()
 
 
-# Botones de Sincronización Automática con la Nube
+def procesar_generico(archivos):
+    lista_dfs = []
+    for archivo in archivos:
+        try:
+            df = pd.read_excel(archivo)
+            lista_dfs.append(df)
+        except Exception as e:
+            st.warning(f"Error al leer {archivo.name}: {e}")
+    if lista_dfs:
+        return pd.concat(lista_dfs, ignore_index=True).drop_duplicates()
+    return pd.DataFrame()
+
+
+# Botones de Sincronización Automática con la Nube (Google Sheets)
 if url_nube:
     col_n1, col_n2 = st.sidebar.columns(2)
     with col_n1:
         if st.button("💾 Guardar"):
             try:
-                mes_act = st.session_state.get("mes_ventas_playa", "Enero")
+                mes_act = st.session_state.get("mes_trabajo", "Enero")
                 df_a_guardar = st.session_state.datos_2026.get(
                     mes_act, pd.DataFrame()
                 )
@@ -166,9 +181,7 @@ if url_nube:
                     headers = data[0]
                     rows = data[1:]
                     df_recuperado = pd.DataFrame(rows, columns=headers)
-                    mes_act = st.session_state.get(
-                        "mes_ventas_playa", "Enero"
-                    )
+                    mes_act = st.session_state.get("mes_trabajo", "Enero")
                     st.session_state.datos_2026[mes_act] = df_recuperado
                     st.sidebar.success(
                         "¡Datos recuperados de Google Sheets!"
@@ -180,11 +193,14 @@ if url_nube:
                 st.sidebar.error(f"Error: {e}")
 
 
+# ==========================================
+# MENÚ 1: VENTAS 2026 (PLAYA)
+# ==========================================
 if menu_principal == "Ventas 2026":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Selección de Mes")
     mes_seleccionado = st.sidebar.selectbox(
-        "Mes de Trabajo", meses_lista, key="mes_ventas_playa"
+        "Mes de Trabajo", meses_lista, key="mes_trabajo"
     )
 
     st.sidebar.markdown("---")
@@ -209,13 +225,15 @@ if menu_principal == "Ventas 2026":
         st.subheader(f"📋 Detalle de Transacciones - {mes_seleccionado} 2026")
 
         total_litros_26 = df_2026_detalle["Volumen"].sum()
+        total_monto_26 = df_2026_detalle["Monto"].sum()
         total_despachos_26 = len(df_2026_detalle)
 
-        col_m1, col_m2 = st.columns(2)
+        col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric(
             "Litros Vendidos Totales", fmt_litros(total_litros_26)
         )
-        col_m2.metric(
+        col_m2.metric("Monto Total Facturado", fmt_pesos(total_monto_26))
+        col_m3.metric(
             "Cantidad de Despachos", fmt_entero(total_despachos_26)
         )
 
@@ -225,11 +243,11 @@ if menu_principal == "Ventas 2026":
         df_2026_detalle["Producto_Upper"] = (
             df_2026_detalle["Producto"].astype(str).str.strip().str.upper()
         )
-
         df_mix_agrupado = (
             df_2026_detalle.groupby("Producto_Upper")
             .agg(
                 Litros=("Volumen", "sum"),
+                Monto=("Monto", "sum"),
                 Despachos=("Volumen", "count"),
             )
             .reset_index()
@@ -238,42 +256,123 @@ if menu_principal == "Ventas 2026":
         st.dataframe(
             df_mix_agrupado.style.format({
                 "Litros": fmt_litros,
+                "Monto": fmt_pesos,
                 "Despachos": fmt_entero,
             }),
             use_container_width=True,
         )
 
         with st.expander("🔍 Ver transacciones detalladas completas"):
-            df_detalle_display = df_2026_detalle.copy()
-            df_detalle_display.index = df_detalle_display.index + 1
-            st.dataframe(df_detalle_display, use_container_width=True)
+            df_display = df_2026_detalle.copy()
+            df_display.index = df_display.index + 1
+            st.dataframe(df_display, use_container_width=True)
 
-        output_detalles = io.BytesIO()
-        with pd.ExcelWriter(output_detalles, engine="openpyxl") as writer:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df_2026_detalle.to_excel(
-                writer,
-                sheet_name=f"Detalle Ventas {mes_seleccionado}",
-                index=False,
+                writer, sheet_name="Detalle Ventas", index=False
             )
             df_mix_agrupado.to_excel(
-                writer, sheet_name="Resumen por Producto", index=False
+                writer, sheet_name="Mix Productos", index=False
             )
 
         st.markdown("---")
         st.download_button(
-            label=f"Descargar Reporte Detallado y Mix ({mes_seleccionado}) en Excel (.xlsx)",
-            data=output_detalles.getvalue(),
-            file_name=f"reporte_detallado_ventas_{mes_seleccionado}_2026.xlsx",
+            label=f"📥 Descargar Reporte Completo ({mes_seleccionado})",
+            data=output.getvalue(),
+            file_name=f"ventas_playa_{mes_seleccionado}_2026.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
         st.info(
-            f"👈 Sube tus archivos Excel detallados de Ventas 2026 para **{mes_seleccionado}** o haz clic en 'Cargar' en la barra lateral."
+            f"👈 Sube tus archivos Excel en la barra lateral para comenzar con **{mes_seleccionado}**."
         )
 
+
+# ==========================================
+# MENÚ 2: TURNOS POR DÍA
+# ==========================================
 elif menu_principal == "🌙 Turnos por Día":
-    pass
+    st.subheader("🌙 Control de Turnos por Día")
+    st.markdown(
+        "Sube los reportes correspondientes al cierre de turnos operativos."
+    )
+
+    archivos_turnos = st.file_uploader(
+        "Sube archivos de Turnos",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="uploader_turnos",
+    )
+
+    if archivos_turnos:
+        df_turnos = procesar_generico(archivos_turnos)
+        if not df_turnos.empty:
+            st.session_state.turnos_2026["general"] = df_turnos
+            st.success(
+                "¡Archivos de turnos procesados y cargados con éxito!"
+            )
+
+    df_t_activo = st.session_state.turnos_2026.get("general", pd.DataFrame())
+    if not df_t_activo.empty:
+        st.dataframe(df_t_activo, use_container_width=True)
+    else:
+        st.info(
+            "Sube los archivos de turnos para visualizar la información consolidada."
+        )
+
+
+# ==========================================
+# MENÚ 3: TIENDA FULL
+# ==========================================
 elif menu_principal == "🛒 Tienda Full":
-    pass
+    st.subheader("🛒 Gestión y Ventas - Tienda Full")
+    st.markdown("Sube los reportes de ventas y stock de la Tienda Full.")
+
+    archivos_full = st.file_uploader(
+        "Sube archivos de Tienda Full",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="uploader_full",
+    )
+
+    if archivos_full:
+        df_full = procesar_generico(archivos_full)
+        if not df_full.empty:
+            st.session_state.full_2026["general"] = df_full
+            st.success("¡Reportes de Tienda Full cargados correctamente!")
+
+    df_f_activo = st.session_state.full_2026.get("general", pd.DataFrame())
+    if not df_f_activo.empty:
+        st.dataframe(df_f_activo, use_container_width=True)
+    else:
+        st.info("Sube los archivos de la Tienda Full para ver los reportes.")
+
+
+# ==========================================
+# MENÚ 4: BOXES
+# ==========================================
 elif menu_principal == "📦 BOXES":
-    pass
+    st.subheader("📦 Control de Servicios - BOXES")
+    st.markdown("Sube los reportes de lubricantes, servicios y boxes.")
+
+    archivos_boxes = st.file_uploader(
+        "Sube archivos de BOXES",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="uploader_boxes",
+    )
+
+    if archivos_boxes:
+        df_boxes = procesar_generico(archivos_boxes)
+        if not df_boxes.empty:
+            st.session_state.boxes_2026["general"] = df_boxes
+            st.success("¡Datos de BOXES cargados con éxito!")
+
+    df_b_activo = st.session_state.boxes_2026.get("general", pd.DataFrame())
+    if not df_b_activo.empty:
+        st.dataframe(df_b_activo, use_container_width=True)
+    else:
+        st.info(
+            "Sube los archivos de BOXES para visualizar el resumen operativo."
+        )
