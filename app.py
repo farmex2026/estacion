@@ -106,9 +106,10 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles["Monto"] = limpiar_serie_numerica(
                     df_raw.iloc[7:, 6]
                 )
-                df_detalles["Volumen"] = limpiar_serie_numerica(
-                    df_raw.iloc[7:, 7]
-                )
+                
+                # Dividimos por 1000 para pasar de mililitros a litros reales
+                vol_bruto = limpiar_serie_numerica(df_raw.iloc[7:, 7])
+                df_detalles["Volumen"] = vol_bruto / 1000.0
 
                 df_detalles = df_detalles.dropna(
                     subset=["Producto", "Volumen"], how="all"
@@ -457,8 +458,9 @@ elif menu_principal == "🌙 Ventas por Turnos":
             st.session_state.turnos_2026[mes_turno] = df_nube_t
 
     with st.sidebar.expander("🔐 Panel Admin (Subir Excel Turnos)"):
+        st.markdown("1 - Informe Vox")
         archivos_turnos = st.file_uploader(
-            f"Subir Excel Turnos - {mes_turno}",
+            mes_turno,
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key=f"uploader_turnos_{mes_turno}",
@@ -564,4 +566,4 @@ elif menu_principal == "📦 BOXES":
     if not df_b_activo.empty:
         st.dataframe(df_b_activo, use_container_width=True)
     else:
-        st.info("No hay información de BOXES disponible.")
+        st.info("📦 Control de Servicios - BOXES")
