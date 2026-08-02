@@ -149,7 +149,13 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         "Mes de Trabajo", meses_lista, key="mes_trabajo"
     )
 
-    # CORRECCIÓN CLAVE: Solo busca en la nube si todavía no tenemos datos guardados en memoria
+    # BOTÓN PARA FORZAR RECARGA DESDE LA NUBE
+    if st.sidebar.button("🔄 Recargar datos desde la Nube"):
+        st.session_state.datos_2025.pop(mes_seleccionado, None)
+        st.session_state.datos_2026.pop(mes_seleccionado, None)
+        st.rerun()
+
+    # DESCARGA DESDE LA NUBE SI NO ESTÁN EN MEMORIA
     if (
         mes_seleccionado not in st.session_state.datos_2025
         or st.session_state.datos_2025[mes_seleccionado].empty
