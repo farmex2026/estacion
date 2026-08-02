@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import urllib.parse
 import pandas as pd
 import requests
 import streamlit as st
@@ -124,22 +125,10 @@ def procesar_archivos_playa_detalle(archivos):
     return pd.DataFrame()
 
 
-def procesar_generico(archivos):
-    lista_dfs = []
-    for archivo in archivos:
-        try:
-            df = pd.read_excel(archivo)
-            lista_dfs.append(df)
-        except Exception as e:
-            st.warning(f"Error al leer {archivo.name}: {e}")
-    if lista_dfs:
-        return pd.concat(lista_dfs, ignore_index=True).drop_duplicates()
-    return pd.DataFrame()
-
-
 def cargar_desde_nube(mes, anio):
     sheet_name = f"{mes} {anio}"
     try:
+        # Usamos params para que codifique correctamente el espacio en la URL
         resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=5)
         data = resp.json()
         if data and len(data) > 1:
@@ -170,15 +159,13 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         "Mes de Trabajo", meses_lista, key="mes_trabajo"
     )
 
-    # DESCARGA AUTOMÁTICA DESDE GOOGLE SHEETS PARA AMBOS AÑOS
-    if mes_seleccionado not in st.session_state.datos_2025:
-        st.session_state.datos_2025[mes_seleccionado] = cargar_desde_nube(
-            mes_seleccionado, 2025
-        )
-    if mes_seleccionado not in st.session_state.datos_2026:
-        st.session_state.datos_2026[mes_seleccionado] = cargar_desde_nube(
-            mes_seleccionado, 2026
-        )
+    # FORZAMOS LA DESCARGA DESDE LA NUBE AL CAMBIAR DE MES
+    st.session_state.datos_2025[mes_seleccionado] = cargar_desde_nube(
+        mes_seleccionado, 2025
+    )
+    st.session_state.datos_2026[mes_seleccionado] = cargar_desde_nube(
+        mes_seleccionado, 2026
+    )
 
     # PANEL EXCLUSIVO PARA EL ADMINISTRADOR (SUBIDA DE EXCEL 2025 / 2026)
     with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
