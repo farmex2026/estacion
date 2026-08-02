@@ -119,8 +119,25 @@ def procesar_archivos_playa_detalle(archivos):
 def cargar_desde_nube(mes, anio):
     sheet_name = f"{mes} {anio}"
     try:
-        resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=5)
-        data = resp.json()
+        resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=10)
+
+        if resp.status_code != 200:
+            st.error(f"Error HTTP {resp.status_code} al conectar con Google.")
+            return pd.DataFrame()
+
+        try:
+            data = resp.json()
+        except Exception:
+            st.error(
+                "Google devolvió una página de error (probablemente falta"
+                " autorizar permisos en Apps Script)."
+            )
+            return pd.DataFrame()
+
+        if isinstance(data, dict) and "error" in data:
+            st.error(f"Error devuelto por Google Sheets: {data['error']}")
+            return pd.DataFrame()
+
         if data and len(data) > 1:
             headers = data[0]
             rows = data[1:]
@@ -134,8 +151,14 @@ def cargar_desde_nube(mes, anio):
                     df["Monto"], errors="coerce"
                 ).fillna(0)
             return df
-    except Exception:
-        pass
+        else:
+            st.warning(
+                f"La solapa '{sheet_name}' existe pero está vacía o Google no"
+                " encontró datos."
+            )
+    except Exception as e:
+        st.error(f"Error de conexión con la nube: {e}")
+
     return pd.DataFrame()
 
 
