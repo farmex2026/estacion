@@ -60,15 +60,6 @@ def fmt_litros(val):
     return f"{enteros},{decimales} L"
 
 
-def fmt_pesos(val):
-    if pd.isna(val):
-        return "$ 0,00"
-    partes = f"{val:,.2f}".split(".")
-    enteros = partes[0].replace(",", ".")
-    decimales = partes[1]
-    return f"$ {enteros},{decimales}"
-
-
 def fmt_entero(val):
     if pd.isna(val):
         return "0"
@@ -220,15 +211,13 @@ if menu_principal == "Ventas 2026":
         st.subheader(f"📋 Detalle de Transacciones - {mes_seleccionado} 2026")
 
         total_litros_26 = df_2026_detalle["Volumen"].sum()
-        total_monto_26 = df_2026_detalle["Monto"].sum()
         total_despachos_26 = len(df_2026_detalle)
 
-        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1, col_m2 = st.columns(2)
         col_m1.metric(
             "Litros Vendidos Totales", fmt_litros(total_litros_26)
         )
-        col_m2.metric("Monto Total Facturado", fmt_pesos(total_monto_26))
-        col_m3.metric(
+        col_m2.metric(
             "Cantidad de Despachos", fmt_entero(total_despachos_26)
         )
 
@@ -242,7 +231,6 @@ if menu_principal == "Ventas 2026":
             df_2026_detalle.groupby("Producto_Upper")
             .agg(
                 Litros=("Volumen", "sum"),
-                Monto=("Monto", "sum"),
                 Despachos=("Volumen", "count"),
             )
             .reset_index()
@@ -251,7 +239,6 @@ if menu_principal == "Ventas 2026":
         st.dataframe(
             df_mix_agrupado.style.format({
                 "Litros": fmt_litros,
-                "Monto": fmt_pesos,
                 "Despachos": fmt_entero,
             }),
             use_container_width=True,
