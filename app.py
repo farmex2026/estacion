@@ -306,45 +306,52 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
             st.session_state.datos_2026[mes_seleccionado] = df_nube_26
 
     with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
-        st.markdown("1 - Informe Vox")
-        anio_upload = st.selectbox("Año del Archivo", [2026, 2025], index=0)
-        archivos_playa = st.file_uploader(
-            mes_seleccionado,
+        st.markdown("##### 📁 Subir Datos 2025")
+        archivos_playa_25 = st.file_uploader(
+            f"Excel 2025 - {mes_seleccionado}",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
-            key=f"uploader_playa_{anio_upload}_{mes_seleccionado}",
+            key=f"uploader_playa_2025_{mes_seleccionado}",
         )
-
-        if archivos_playa:
-            df_detalle_procesado = procesar_archivos_playa_detalle(
-                archivos_playa
-            )
-            if not df_detalle_procesado.empty:
-                if anio_upload == 2025:
-                    st.session_state.datos_2025[mes_seleccionado] = (
-                        df_detalle_procesado
-                    )
-                    sheet_name_target = sheet_25
-                else:
-                    st.session_state.datos_2026[mes_seleccionado] = (
-                        df_detalle_procesado
-                    )
-                    sheet_name_target = sheet_26
-
+        if archivos_playa_25:
+            df_det_25 = procesar_archivos_playa_detalle(archivos_playa_25)
+            if not df_det_25.empty:
+                st.session_state.datos_2025[mes_seleccionado] = df_det_25
                 try:
-                    df_detalle_nube = df_detalle_procesado.fillna("").astype(str)
+                    df_nube_sub = df_det_25.fillna("").astype(str)
                     payload = {
-                        "month": sheet_name_target,
-                        "headers": df_detalle_nube.columns.tolist(),
-                        "rows": df_detalle_nube.values.tolist(),
+                        "month": sheet_25,
+                        "headers": df_nube_sub.columns.tolist(),
+                        "rows": df_nube_sub.values.tolist(),
                     }
                     requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(
-                        f"¡Subido y guardado en la nube ({sheet_name_target}) con"
-                        " éxito!"
-                    )
+                    st.success(f"¡Guardado en nube ({sheet_25})!")
                 except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                    st.error(f"Error: {e}")
+
+        st.markdown("---")
+        st.markdown("##### 📁 Subir Datos 2026")
+        archivos_playa_26 = st.file_uploader(
+            f"Excel 2026 - {mes_seleccionado}",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key=f"uploader_playa_2026_{mes_seleccionado}",
+        )
+        if archivos_playa_26:
+            df_det_26 = procesar_archivos_playa_detalle(archivos_playa_26)
+            if not df_det_26.empty:
+                st.session_state.datos_2026[mes_seleccionado] = df_det_26
+                try:
+                    df_nube_sub = df_det_26.fillna("").astype(str)
+                    payload = {
+                        "month": sheet_26,
+                        "headers": df_nube_sub.columns.tolist(),
+                        "rows": df_nube_sub.values.tolist(),
+                    }
+                    requests.post(URL_NUBE, json=payload, timeout=60)
+                    st.success(f"¡Guardado en nube ({sheet_26})!")
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
     df_25 = st.session_state.datos_2025.get(mes_seleccionado, pd.DataFrame())
     df_26 = st.session_state.datos_2026.get(mes_seleccionado, pd.DataFrame())
@@ -527,13 +534,13 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
 # MENÚ 2: VENTAS POR TURNOS (2026)
 # ==========================================
 elif menu_principal == "🌙 Ventas por Turnos":
-    st.subheader(f"🌙 Control de Ventas por Turnos - {mes_turno if 'mes_turno' in locals() else 'Enero'} (2026)")
-
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes (Turnos)")
     mes_turno = st.sidebar.selectbox(
         "Mes de Turnos", meses_lista, key="mes_turno_trabajo"
     )
+
+    st.subheader(f"🌙 Control de Ventas por Turnos - {mes_turno} (2026)")
 
     if st.sidebar.button("🔄 Recargar Turnos desde la Nube"):
         st.session_state.turnos_2026.pop(mes_turno, None)
