@@ -378,7 +378,6 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                 mix_25, mix_26, on="Producto_Upper", how="outer"
             ).fillna(0)
 
-            # Cálculo de los totales generales de litros para sacar el Mix (%)
             total_litros_25_mix = df_mix_vs["Litros_25"].sum()
             total_litros_26_mix = df_mix_vs["Litros_26"].sum()
 
@@ -406,12 +405,13 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                 axis=1,
             )
 
+            # Columnas ordenadas: Litros 2025 al lado de Litros 2026, Mix 2025 al lado de Mix 2026
             df_tabla_final = pd.DataFrame({
                 "Combustible": df_mix_vs["Producto_Upper"],
                 "Litros 2025": df_mix_vs["Litros_25"],
-                "Mix 2025 (%)": df_mix_vs["Mix_25"],
                 "Litros 2026": df_mix_vs["Litros_26"],
-                "Mix 2026 (%)": df_mix_vs["Mix_26"],
+                "Mix 2025": df_mix_vs["Mix_25"],
+                "Mix 2026": df_mix_vs["Mix_26"],
                 "Variación (%)": df_mix_vs["Variación Litros (%)"],
                 "Despachos 2025": df_mix_vs["Despachos_25"],
                 "Despachos 2026": df_mix_vs["Despachos_26"],
@@ -420,9 +420,9 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
             st.dataframe(
                 df_tabla_final.style.format({
                     "Litros 2025": fmt_litros,
-                    "Mix 2025 (%)": lambda x: f"{x:.2f}%",
                     "Litros 2026": fmt_litros,
-                    "Mix 2026 (%)": lambda x: f"{x:.2f}%",
+                    "Mix 2025": lambda x: f"{x:.2f}%",
+                    "Mix 2026": lambda x: f"{x:.2f}%",
                     "Variación (%)": lambda x: f"{x:+.2f}%",
                     "Despachos 2025": fmt_entero,
                     "Despachos 2026": fmt_entero,
