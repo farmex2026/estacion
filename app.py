@@ -149,7 +149,6 @@ def procesar_archivos_turnos(archivos):
     lista_dfs = []
     for archivo in archivos:
         try:
-            # Header en fila 2 (index 1), datos desde fila 3 en adelante
             df = pd.read_excel(archivo, header=1)
             df.columns = [str(c).strip() for c in df.columns]
             lista_dfs.append(df)
@@ -180,7 +179,6 @@ def procesar_df_turnos_2026(df):
                 return matches[0]
         return cols[idx] if idx < len(cols) else None
 
-    # Mapeo exacto solicitado a partir de A3 (col 0): Fecha, B3: NAFTA SUPER, C3: DIESEL 500, D3: INFINIA NAFTA, E3: INFINIA DIESEL, F3: TOTAL
     col_fecha = get_col(0, ["fecha", "apertura"])
     col_super = get_col(1, ["nafta super", "super"])
     col_diesel = get_col(2, ["diesel 500", "d500", "diesel"])
@@ -188,7 +186,6 @@ def procesar_df_turnos_2026(df):
     col_inf_diesel = get_col(4, ["infinia diesel"])
     col_total = get_col(5, ["total", "totales"])
 
-    # Columna de Turno adicional
     col_turno = None
     for c in cols:
         c_low = str(c).lower()
@@ -218,6 +215,10 @@ def procesar_df_turnos_2026(df):
         res["Turno"] = df[col_turno].apply(mapear_turno_2026)
     else:
         res["Turno"] = "DESCONOCIDO"
+
+    if not res.empty:
+        mask_basura = res["Fecha"].astype(str).str.strip().str.lower().isin(["fecha apertura", "fecha", "apertura", "nan", ""])
+        res = res[~mask_basura].reset_index(drop=True)
 
     return res
 
