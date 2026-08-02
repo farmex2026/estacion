@@ -151,21 +151,16 @@ def procesar_archivos_turnos(archivos):
     lista_dfs = []
     for archivo in archivos:
         try:
-            df = pd.read_excel(archivo)
-            for col in df.columns:
-                c_low = str(col).lower()
-                if any(
-                    k in c_low
-                    for k in [
-                        "volumen",
-                        "litro",
-                        "cantidad",
-                    ]
-                ):
-                    df[col] = limpiar_serie_numerica(df[col])
+            # Intento leyendo con header en la fila 2 (index 1)
+            df = pd.read_excel(archivo, header=1)
+            df.columns = [str(c).strip() for c in df.columns]
             lista_dfs.append(df)
         except Exception as e:
-            st.warning(f"Aviso al procesar {archivo.name}: {e}")
+            try:
+                df = pd.read_excel(archivo)
+                lista_dfs.append(df)
+            except Exception as e2:
+                st.warning(f"Aviso al procesar {archivo.name}: {e2}")
     if lista_dfs:
         df_concatenado = pd.concat(lista_dfs, ignore_index=True)
         return df_concatenado.drop_duplicates().reset_index(drop=True)
@@ -174,22 +169,51 @@ def procesar_archivos_turnos(archivos):
 
 def procesar_df_turnos_para_comparativa(df):
     if df.empty:
-        return pd.DataFrame(columns=["Turno", "Litros"])
-    cols_lower = [str(c).lower() for c in df.columns]
+        return pd.DataFrame(), pd.DataFrame()
     
-    col_t = next((df.columns[i] for i, c in enumerate(cols_lower) if any(k in c for k in ["turno", "nro", "shift", "caja"])), df.columns[0])
-    col_v = next((df.columns[i] for i, c in enumerate(cols_lower) if any(k in c for k in ["volumen", "litro", "cantidad"])), None)
+    cols_lower = [str(c).lower().strip() for c in df.columns]
     
-    if not col_v:
-        num_cols = [c for c in df.columns if c != col_t and pd.api.types.is_numeric_dtype(df[c])]
-        col_v = num_cols[0] if num_cols else df.columns[1] if len(df.columns) > 1 else df.columns[0]
+    # Identificar columna de Turno (si existe, sino buscar la que tenga 1, 2, 3)
+    col_t = next((df.columns[i] for i, c in enumerate(cols_lower) if any(k in c for k in ["turno", "nro", "shift", "caja"])), None)
+    if not col_t:
+        for c in df.columns:
+            vals = df[c].dropna().astype(str).str.strip().unique()
+            if any(v in ["1", "2", "3", "1.0", "2.0", "3.0"] for v in vals):
+                col_t = c
+                break
+    if not col_t and len(df.columns) > 0:
+        col_t = df.columns[0]
+
+    # Identificar columnas de productos basados en la estructura A2: Fecha Apertura, B2: NAFTA SUPER, C2: DIESEL 500, D2: INFINIA NAFTA, E2: INFINIA DIESEL, F2: Totales
+    col_fecha = next((df.columns[i] for i, c in enumerate(cols_lower) if "fecha" in c or "apertura" in c), df.columns[0] if len(df.columns)>0 else None)
+    col_super = next((df.columns[i] for i, c in enumerate(cols_lower) if "super" in c), None)
+    col_diesel = next((df.columns[i] for i, c in enumerate(cols_lower) if "diesel 500" in c or "d500" in c or ("diesel" in c and "500" in c)), None)
+    col_inf_nafta = next((df.columns[i] for i, c in enumerate(cols_lower) if "infinia" in c and "nafta" in c), None)
+    col_inf_diesel = next((df.columns[i] for i, c in enumerate(cols_lower) if "infinia" in c and "diesel" in c), None)
+    col_totales = next((df.columns[i] for i, c in enumerate(cols_lower) if "total" in c), None)
 
     temp = pd.DataFrame()
-    temp["Turno"] = df[col_t].apply(limpiar_nombre_turno)
-    temp["Litros"] = limpiar_serie_numerica(df[col_v]) if col_v in df.columns else 0.0
-        
-    agrupado = temp.groupby("Turno").agg({"Litros": "sum"}).reset_index()
-    return agrupado
+    temp["Fecha"] = df[col_fecha] if col_fecha in df.columns else ""
+    temp["Turno"] = df[col_t].apply(limpiar_nombre_turno) if col_t in df.columns else "TURNO NOCHE"
+    
+    temp["NAFTA SUPER"] = limpiar_serie_numerica(df[col_super]) if col_super and col_super in df.columns else 0.0
+    temp["DIESEL 500"] = limpiar_serie_numerica(df[col_diesel]) if col_diesel and col_diesel in df.columns else 0.0
+    temp["INFINIA NAFTA"] = limpiar_serie_numerica(df[col_inf_nafta]) if col_inf_nafta and col_inf_nafta in df.columns else 0.0
+    temp["INFINIA DIESEL"] = limpiar_serie_numerica(df[col_inf_diesel]) if col_inf_diesel and col_inf_diesel in df.columns else 0.0
+    
+    if col_totales and col_totales in df.columns:
+        temp["Totales"] = limpiar_serie_numerica(df[col_totales])
+    else:
+        temp["Totales"] = temp["NAFTA SUPER"] + temp["DIESEL 500"] + temp["INFINIA NAFTA"] + temp["INFINIA DIESEL"]
+
+    # 1. Agrupado por Turno
+    agrupado_turno = temp.groupby("Turno").agg({"Totales": "sum"}).reset_index().rename(columns={"Totales": "Litros"})
+    
+    # 2. Agrupado por Producto y Turno (para el versus de tipos de productos por turno)
+    melted = temp.melt(id_vars=["Turno", "Fecha"], value_vars=["NAFTA SUPER", "DIESEL 500", "INFINIA NAFTA", "INFINIA DIESEL"], var_name="Producto", value_name="Litros")
+    agrupado_producto_turno = melted.groupby(["Turno", "Producto"]).agg({"Litros": "sum"}).reset_index()
+
+    return agrupado_turno, agrupado_producto_turno
 
 
 def cargar_desde_nube(sheet_name):
@@ -219,6 +243,10 @@ def cargar_desde_nube(sheet_name):
                         "volumen",
                         "litro",
                         "cantidad",
+                        "super",
+                        "diesel",
+                        "infinia",
+                        "totales",
                     ]
                 ):
                     df[col] = limpiar_serie_numerica(df[col])
@@ -482,7 +510,7 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
 # MENÚ 2: VENTAS POR TURNOS (2025 vs 2026)
 # ==========================================
 elif menu_principal == "🌙 Ventas por Turnos":
-    st.subheader("🌙 Control de Ventas por Turnos (2025 vs 2026)")
+    st.subheader("🌙 Control de Ventas por Turnos y Productos (2025 vs 2026)")
 
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes (Turnos)")
@@ -550,8 +578,8 @@ elif menu_principal == "🌙 Ventas por Turnos":
     df_t_25 = st.session_state.turnos_2025.get(mes_turno, pd.DataFrame())
     df_t_26 = st.session_state.turnos_2026.get(mes_turno, pd.DataFrame())
 
-    res_t_25 = procesar_df_turnos_para_comparativa(df_t_25) if not df_t_25.empty else pd.DataFrame(columns=["Turno", "Litros"])
-    res_t_26 = procesar_df_turnos_para_comparativa(df_t_26) if not df_t_26.empty else pd.DataFrame(columns=["Turno", "Litros"])
+    res_t_25, prod_t_25 = procesar_df_turnos_para_comparativa(df_t_25) if not df_t_25.empty else (pd.DataFrame(columns=["Turno", "Litros"]), pd.DataFrame(columns=["Turno", "Producto", "Litros"]))
+    res_t_26, prod_t_26 = procesar_df_turnos_para_comparativa(df_t_26) if not df_t_26.empty else (pd.DataFrame(columns=["Turno", "Litros"]), pd.DataFrame(columns=["Turno", "Producto", "Litros"]))
 
     if not res_t_25.empty or not res_t_26.empty:
         st.markdown(f"### 📋 Totales y Comparativa de Ventas por Turnos - {mes_turno} (2025 vs 2026)")
@@ -613,6 +641,33 @@ elif menu_principal == "🌙 Ventas por Turnos":
             use_container_width=True,
             hide_index=True,
         )
+
+        st.markdown("---")
+        st.subheader("⛽ Versus de Tipos de Productos por Turno (2025 vs 2026)")
+
+        if not prod_t_25.empty or not prod_t_26.empty:
+            df_prod_vs = pd.merge(prod_t_25, prod_t_26, on=["Turno", "Producto"], how="outer", suffixes=("_25", "_26")).fillna(0)
+            df_prod_vs["Var (%)"] = df_prod_vs.apply(lambda r: ((r["Litros_26"] - r["Litros_25"]) / r["Litros_25"] * 100) if r["Litros_25"] > 0 else 0.0, axis=1)
+
+            df_tabla_prod_turnos = pd.DataFrame({
+                "Turno": df_prod_vs["Turno"],
+                "Producto": df_prod_vs["Producto"],
+                "Litros 2025": df_prod_vs["Litros_25"],
+                "Litros 2026": df_prod_vs["Litros_26"],
+                "Variación (%)": df_prod_vs["Var (%)"],
+            })
+
+            st.dataframe(
+                df_tabla_prod_turnos.style.format({
+                    "Litros 2025": fmt_litros,
+                    "Litros 2026": fmt_litros,
+                    "Variación (%)": lambda x: f"{x:+.2f}%",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No hay datos de desglose por productos para los turnos seleccionados.")
 
         with st.expander("🔍 Ver registros detallados originales de Turnos"):
             if not df_t_26.empty:
