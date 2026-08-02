@@ -354,6 +354,9 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
             f"📈 Comparativa General - {mes_seleccionado} (2025 vs 2026)"
         )
 
+        if df_25.empty:
+            st.info(f"ℹ️ Mostrando datos de **2026**. No hay registros cargados de **2025** para el mes de {mes_seleccionado}, por lo que la comparativa se mostrará sin base 2025.")
+
         litros_25 = df_25["Volumen"].sum() if not df_25.empty else 0.0
         litros_26 = df_26["Volumen"].sum() if not df_26.empty else 0.0
         diff_litros = litros_26 - litros_25
@@ -366,14 +369,14 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
         diff_desp = desp_26 - desp_25
         pct_desp = ((diff_desp / desp_25 * 100) if desp_25 > 0 else 0.0)
 
-        if litros_25 > litros_26:
+        if not df_25.empty and litros_25 > litros_26:
             st.info(
                 f"💡 **Lectura de ventas ({mes_seleccionado}):** Se vendió"
                 f" **más en 2025** ({fmt_litros(litros_25)}) que en **2026**"
                 f" ({fmt_litros(litros_26)}). La variación es de"
                 f" **{pct_litros:+.2f}%**."
             )
-        elif litros_26 > litros_25:
+        elif not df_25.empty and litros_26 > litros_25:
             st.success(
                 f"💡 **Lectura de ventas ({mes_seleccionado}):** Se vendió"
                 f" **más en 2026** ({fmt_litros(litros_26)}) que en **2025**"
@@ -386,13 +389,13 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
             st.metric(
                 label="⛽ Total Litros Vendidos (2026)",
                 value=fmt_litros(litros_26),
-                delta=f"{pct_litros:+.2f}% respecto a 2025 ({fmt_litros(litros_25)})",
+                delta=f"{pct_litros:+.2f}% respecto a 2025 ({fmt_litros(litros_25)})" if not df_25.empty else "Sin datos 2025",
             )
         with col_m2:
             st.metric(
                 label="🧾 Total de Despachos (2026)",
                 value=fmt_entero(desp_26),
-                delta=f"{pct_desp:+.2f}% respecto a 2025 ({fmt_entero(desp_25)})",
+                delta=f"{pct_desp:+.2f}% respecto a 2025 ({fmt_entero(desp_25)})" if not df_25.empty else "Sin datos 2025",
             )
 
         st.markdown("---")
@@ -524,7 +527,7 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
 # MENÚ 2: VENTAS POR TURNOS (2026)
 # ==========================================
 elif menu_principal == "🌙 Ventas por Turnos":
-    st.subheader("🌙 Control de Ventas por Turnos (2026)")
+    st.subheader(f"🌙 Control de Ventas por Turnos - {mes_turno if 'mes_turno' in locals() else 'Enero'} (2026)")
 
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes (Turnos)")
@@ -577,21 +580,22 @@ elif menu_principal == "🌙 Ventas por Turnos":
     if not df_t_26.empty:
         df_procesado_2026 = procesar_df_turnos_2026(df_t_26)
 
-        st.markdown(f"### 📋 Detalle de Turnos y Productos - {mes_turno} (2026)")
-        st.dataframe(
-            df_procesado_2026.style.format({
-                "NAFTA SUPER": fmt_litros,
-                "DIESEL 500": fmt_litros,
-                "INFINIA NAFTA": fmt_litros,
-                "INFINIA DIESEL": fmt_litros,
-                "TOTAL": fmt_litros,
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
+        total_litros_turnos = df_procesado_2026["TOTAL"].sum()
+
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            st.metric(
+                label="⛽ Total Litros por Turnos (2026)",
+                value=fmt_litros(total_litros_turnos)
+            )
+        with col_t2:
+            st.metric(
+                label="🌙 Turnos Registrados",
+                value=fmt_entero(len(df_procesado_2026))
+            )
 
         st.markdown("---")
-        st.subheader("📊 Reporte de Ventas por Turno (2026)")
+        st.subheader("📊 Resumen de Ventas por Turno")
         resumen_turno = df_procesado_2026.groupby("Turno").agg({
             "NAFTA SUPER": "sum",
             "DIESEL 500": "sum",
@@ -611,6 +615,19 @@ elif menu_principal == "🌙 Ventas por Turnos":
             use_container_width=True,
             hide_index=True,
         )
+
+        with st.expander("📋 Ver detalle completo de turnos (día por día)"):
+            st.dataframe(
+                df_procesado_2026.style.format({
+                    "NAFTA SUPER": fmt_litros,
+                    "DIESEL 500": fmt_litros,
+                    "INFINIA NAFTA": fmt_litros,
+                    "INFINIA DIESEL": fmt_litros,
+                    "TOTAL": fmt_litros,
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
 
         output_t = io.BytesIO()
         with pd.ExcelWriter(output_t, engine="openpyxl") as writer:
