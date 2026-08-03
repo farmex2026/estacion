@@ -117,59 +117,54 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     st.subheader(f"⛽ COMBUSTIBLES - {mes_seleccionado_comb} (VS 2026 vs 2025)")
 
     # Procesar datos 2026
-    ventas_2026, vol_2026, desp_2026 = 0, 0, 0
+    vol_2026, desp_2026 = 0, 0
     if not df_2026.empty:
         if len(df_2026) > 0 and any("fecha" in str(v).lower() for v in df_2026.iloc[0].values):
             df_2026.columns = df_2026.iloc[0].astype(str).str.strip()
             df_2026 = df_2026.iloc[1:].reset_index(drop=True)
         df_2026.columns = [str(c).strip() for c in df_2026.columns]
-        c_venta_26 = "Venta Total" if "Venta Total" in df_2026.columns else df_2026.columns[4]
         c_vol_26 = "Volumen" if "Volumen" in df_2026.columns else df_2026.columns[3]
-        df_2026[c_venta_26] = pd.to_numeric(df_2026[c_venta_26], errors='coerce').fillna(0)
         df_2026[c_vol_26] = pd.to_numeric(df_2026[c_vol_26], errors='coerce').fillna(0)
-        ventas_2026 = df_2026[c_venta_26].sum()
         vol_2026 = df_2026[c_vol_26].sum()
         desp_2026 = len(df_2026)
 
     # Procesar datos 2025
-    ventas_2025, vol_2025, desp_2025 = 0, 0, 0
+    vol_2025, desp_2025 = 0, 0
     if not df_2025.empty:
         if len(df_2025) > 0 and any("fecha" in str(v).lower() for v in df_2025.iloc[0].values):
             df_2025.columns = df_2025.iloc[0].astype(str).str.strip()
             df_2025 = df_2025.iloc[1:].reset_index(drop=True)
         df_2025.columns = [str(c).strip() for c in df_2025.columns]
-        c_venta_25 = "Venta Total" if "Venta Total" in df_2025.columns else df_2025.columns[4]
         c_vol_25 = "Volumen" if "Volumen" in df_2025.columns else df_2025.columns[3]
-        df_2025[c_venta_25] = pd.to_numeric(df_2025[c_venta_25], errors='coerce').fillna(0)
         df_2025[c_vol_25] = pd.to_numeric(df_2025[c_vol_25], errors='coerce').fillna(0)
-        ventas_2025 = df_2025[c_venta_25].sum()
         vol_2025 = df_2025[c_vol_25].sum()
         desp_2025 = len(df_2025)
 
-    # Métricas comparativas lado a lado
-    col1, col2, col3 = st.columns(3)
+    # Métricas comparativas lado a lado (sin ventas totales en pesos)
+    col1, col2 = st.columns(2)
     with col1:
-        diff_ventas = ((ventas_2026 - ventas_2025) / ventas_2025 * 100) if ventas_2025 > 0 else 0
-        st.metric("⛽ Ventas Totales ($) 2026", f"$ {formato_arg(ventas_2026, 2)}", delta=f"{diff_ventas:+.2f}% vs 2025 ($ {formato_arg(ventas_2025, 2)})")
-    with col2:
         diff_vol = ((vol_2026 - vol_2025) / vol_2025 * 100) if vol_2025 > 0 else 0
         st.metric("📦 Volumen Total (L) 2026", f"{formato_arg(vol_2026, 2)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_2025, 2)} L)")
-    with col3:
+    with col2:
         diff_desp = ((desp_2026 - desp_2025) / desp_2025 * 100) if desp_2025 > 0 else 0
         st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
 
     st.markdown("---")
-    st.markdown(f"### 📋 Detalle General de Cargas - 2026 ({mes_seleccionado_comb})")
-    if not df_2026.empty:
-        df_mostrar_26 = df_2026.drop(columns=[c for c in df_2026.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
-        st.dataframe(df_mostrar_26, use_container_width=True, hide_index=True)
-    else:
-        st.info(f"No hay registros en la nube para Combustibles 2026 - {mes_seleccionado_comb}.")
 
-    # Desplegable para ver los datos de 2025 por debajo
+    # Tabla 2026 plegable y sin columna de Venta Total
+    with st.expander(f"📂 Ver Detalle de Cargas del año 2026 ({mes_seleccionado_comb})", expanded=True):
+        if not df_2026.empty:
+            cols_a_excluir_26 = [c for c in df_2026.columns if str(c).startswith('_') or c == 'prod_lower' or 'venta' in str(c).lower()]
+            df_mostrar_26 = df_2026.drop(columns=cols_a_excluir_26, errors='ignore')
+            st.dataframe(df_mostrar_26, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No hay registros en la nube para Combustibles 2026 - {mes_seleccionado_comb}.")
+
+    # Tabla 2025 plegable y sin columna de Venta Total
     with st.expander(f"📂 Ver Detalle de Cargas del año 2025 ({mes_seleccionado_comb})"):
         if not df_2025.empty:
-            df_mostrar_25 = df_2025.drop(columns=[c for c in df_2025.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
+            cols_a_excluir_25 = [c for c in df_2025.columns if str(c).startswith('_') or c == 'prod_lower' or 'venta' in str(c).lower()]
+            df_mostrar_25 = df_2025.drop(columns=cols_a_excluir_25, errors='ignore')
             st.dataframe(df_mostrar_25, use_container_width=True, hide_index=True)
         else:
             st.info(f"No hay registros en la nube para Combustibles 2025 - {mes_seleccionado_comb}.")
