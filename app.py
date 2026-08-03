@@ -84,7 +84,6 @@ def limpiar_serie_numerica(serie):
     return serie.apply(limpiar_numerico)
 
 
-# Formato solicitado: Redondeo a entero, sin decimales, con puntos para miles (Ej: 198.000 y 1.000)
 def fmt_litros(val):
     if pd.isna(val):
         return "0 L"
@@ -111,7 +110,6 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles["Producto"] = df_raw.iloc[7:, 3]
 
                 vol_bruto = limpiar_serie_numerica(df_raw.iloc[7:, 7])
-                # Redondeo estricto a entero para evitar decimales corruptos o gigantes
                 df_detalles["Volumen"] = (vol_bruto / 1000.0).round().astype(int)
 
                 df_detalles = df_detalles.dropna(
@@ -356,7 +354,8 @@ def cargar_desd_nube(sheet_name):
                         "total",
                     ]
                 ):
-                    df[col] = limpiar_serie_numerica(df).round().astype(int)
+                    # CORREGIDO: Se pasa df[col] en lugar de df completo
+                    df[col] = limpiar_serie_numerica(df[col]).round().astype(int)
             return df
     except Exception:
         pass
