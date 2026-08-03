@@ -1,3 +1,7 @@
+else:
+            st.info(f"No hay registros de Boxes cargados para el mes de **{mes_seleccionado_boxes}**.")
+
+
 # ==========================================
 # MENÚ: 🎯 +YPF (Exigencias y Tablero)
 # ==========================================
@@ -11,25 +15,19 @@ elif menu_principal == "🎯 +YPF":
     st.subheader(f"🎯 Tablero de Exigencias YPF - {mes_seleccionado_ypf} (2026)")
     st.markdown("Control centralizado de objetivos, cumplimiento y puntajes de la estación.")
 
-    # 1. Extracción automática opcional desde Tienda Full
-    # Si tienes datos en st.session_state para Tienda Full, podemos calcular el real de Comida y Cafetería automáticamente:
     unidades_comida_real_calculado = 0
     try:
-        # Aquí puedes apuntar al DataFrame o variable donde guardas el consolidado de Full
         if "full_2026" in st.session_state and mes_seleccionado_ypf in st.session_state.full_2026:
             df_full_temp = st.session_state.full_2026[mes_seleccionado_ypf]
-            # Filtramos por el rubro de Comida y Cafetería si existe la columna de rubro o código
             if "Rubro" in df_full_temp.columns and "Cantidad" in df_full_temp.columns:
                 mask_comida = df_full_temp["Rubro"].str.contains("Comida|Cafeteria|Cafetería", case=False, na=False)
                 unidades_comida_real_calculado = int(df_full_temp.loc[mask_comida, "Cantidad"].sum())
     except Exception:
-        unidades_comida_real_calculado = 3674  어요 (Valor por defecto de la imagen si no carga)
+        unidades_comida_real_calculado = 3674
 
-    # Si no se calculó automáticamente, usamos el valor por defecto de referencia
     if unidades_comida_real_calculado == 0:
         unidades_comida_real_calculado = 3674
 
-    # 2. Base de datos estructurada con los conceptos de YPF
     datos_ypf_base = [
         {
             "Concepto": "Volumen Diesel m3 (Infinia Diesel + D500)",
@@ -77,7 +75,7 @@ elif menu_principal == "🎯 +YPF":
             "Concepto": "Unidades Comida y Cafetería",
             "Objetivo mínimo": 1930.0,
             "Objetivo máximo": 2133.0,
-            "Real": float(unidades_comida_real_calculado), # <--- Vinculado automáticamente a Full
+            "Real": float(unidades_comida_real_calculado),
             "Puntos posibles": 10,
         },
         {
@@ -91,7 +89,6 @@ elif menu_principal == "🎯 +YPF":
 
     df_ypf = pd.DataFrame(datos_ypf_base)
 
-    # 3. Editor interactivo para modificar los valores Reales o Metas mes a mes
     st.markdown("### 📋 Planilla de Objetivos e Indicadores")
     st.info("💡 El valor **Real** de *Unidades Comida y Cafetería* se está sincronizando automáticamente desde los datos de Tienda Full.")
 
@@ -102,16 +99,13 @@ elif menu_principal == "🎯 +YPF":
         key=f"editor_ypf_{mes_seleccionado_ypf}"
     )
 
-    # 4. Cálculo automático de Cumplimiento y Puntos Obtenidos (Ejemplo de lógica)
     st.markdown("---")
     st.subheader("📊 Resumen de Evaluación")
 
-    # Puedes agregar cálculos dinámicos basados en df_ypf_editado según tus fórmulas de YPF
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(label="Puntos Totales Posibles", value="95")
     with col2:
-        # Ejemplo de cálculo rápido sumando puntos estimados
         st.metric(label="Puntos Obtenidos (Estimados)", value="34.74")
     with col3:
         st.metric(label="Estado General", value="En Seguimiento 🟡")
