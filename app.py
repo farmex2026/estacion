@@ -145,6 +145,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         c_prod = next((cols_map[c] for c in cols_map if "producto" in c), None)
         c_vol = next((cols_map[c] for c in cols_map if "volumen" in c), None)
         c_desp = next((cols_map[c] for c in cols_map if "despacho" in c or "cant" in c), None)
+        c_surtidor = next((cols_map[c] for c in cols_map if any(k in c for k in ["surtidor", "surt", "isla", "manguera"])), None)
+        c_dia = next((cols_map[c] for c in cols_map if any(k in c for k in ["dia", "día", "semana", "fecha"])), None)
 
         if c_vol: df_c[c_vol] = pd.to_numeric(df_c[c_vol], errors='coerce').fillna(0)
         if c_desp: df_c[c_desp] = pd.to_numeric(df_c[c_desp], errors='coerce').fillna(0)
@@ -152,12 +154,44 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         total_despachos = int(df_c[c_desp].sum()) if c_desp else len(df_c)
         total_volumen = df_c[c_vol].sum() if c_vol else 0.0
 
-        # Métricas principales arriba de la tabla con formato exacto pedido
+        # Métricas principales alineadas arriba
         col1, col2 = st.columns(2)
         with col1:
             st.metric("📦 Cantidad de Despachos", formato_arg(total_despachos))
         with col2:
             st.metric("⛽ Ventas Totales (Litros)", formato_arg(total_volumen, 2 if total_volumen % 1 != 0 else 0))
+
+        st.markdown("---")
+
+        # Bloque de Surtidores y Días de la semana alineados en columnas
+        col_surt, col_dias = st.columns(2)
+
+        with col_surt:
+            st.markdown("### 🔌 Ventas por Surtidor")
+            if c_surtidor and c_vol:
+                df_surt_sum = df_c.groupby(c_surtidor)[c_vol].sum().reset_index()
+                df_surt_sum.columns = ["Surtidor", "Volumen (Litros)"]
+                df_surt_sum = df_surt_sum.sort_values(by="Volumen (Litros)", ascending=False).reset_index(drop=True)
+                st.dataframe(
+                    df_surt_sum.style.format({"Volumen (Litros)": lambda x: formato_arg(x, 2)}),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("Columna de Surtidor no detectada en la planilla.")
+
+        with col_dias:
+            st.markdown("### 📅 Ventas por Día")
+            if c_dia and c_vol:
+                df_dia_sum = df_c.groupby(c_dia)[c_vol].sum().reset_index()
+                df_dia_sum.columns = ["Día / Fecha", "Volumen (Litros)"]
+                st.dataframe(
+                    df_dia_sum.style.format({"Volumen (Litros)": lambda x: formato_arg(x, 2)}),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("Columna de Día/Fecha no detectada en la planilla.")
 
         st.markdown("---")
 
@@ -204,7 +238,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     st.info("Sin registros de Diésel detectados.")
 
         st.markdown("---")
-        st.markdown("### 📋 Detalle de Cargas")
+        st.markdown("### 📋 Detalle General de Cargas")
         df_mostrar = df_c.drop(columns=[c for c in ['prod_lower'] if c in df_c.columns], errors='ignore')
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
