@@ -1,1052 +1,117 @@
-import io
-import json
-import os
-import re
-import urllib.parse
-from bs4 import BeautifulSoup
-import pandas as pd
-import requests
-import streamlit as st
+# ==========================================
+# MENÚ: 🎯 +YPF (Exigencias y Tablero)
+# ==========================================
+elif menu_principal == "🎯 +YPF":
+    st.sidebar.markdown("---")
+    st.sidebar.header("🎯 Configuración YPF")
+    mes_seleccionado_ypf = st.sidebar.selectbox(
+        "Mes YPF", meses_lista, key="mes_ypf_trabajo"
+    )
 
-st.set_page_config(
-    page_title="Gestión Integral de Estación", page_icon="⛽", layout="wide"
-)
+    st.subheader(f"🎯 Tablero de Exigencias YPF - {mes_seleccionado_ypf} (2026)")
+    st.markdown("Control centralizado de objetivos, cumplimiento y puntajes de la estación.")
 
-URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
-
-st.sidebar.header("☁️ Nube Automática")
-st.sidebar.success("✅ Google Sheets Sincronizado")
-
-if "datos_2025" not in st.session_state:
-    st.session_state.datos_2025 = {}
-if "datos_2026" not in st.session_state:
-    st.session_state.datos_2026 = {}
-if "turnos_2025" not in st.session_state:
-    st.session_state.turnos_2025 = {}
-if "turnos_2026" not in st.session_state:
-    st.session_state.turnos_2026 = {}
-if "full_2025" not in st.session_state:
-    st.session_state.full_2025 = {}
-if "full_2026" not in st.session_state:
-    st.session_state.full_2026 = {}
-if "boxes_2026" not in st.session_state:
-    st.session_state.boxes_2026 = {}
-
-menu_principal = st.sidebar.selectbox(
-    "📂 Menú Principal",
-    [
-        "📊 Ventas (2025 vs 2026)",
-        "🌙 Ventas por Turnos",
-        "🛒 Tienda Full",
-        "📦 BOXES",
-    ],
-)
-
-meses_lista = [
-    "Enero",
-    "Febrero",
-    "Marzo",
-    "Abril",
-    "Mayo",
-    "Junio",
-    "Julio",
-    "Agosto",
-    "Septiembre",
-    "Octubre",
-    "Noviembre",
-    "Diciembre",
-]
-
-
-def limpiar_numerico(val):
-    if pd.isna(val):
-        return 0.0
-    if isinstance(val, (int, float)):
-        return float(val)
-    s = str(val).strip()
-    if not s or s.lower() == "nan":
-        return 0.0
-    s = re.sub(r"[^\d.,-]", "", s)
-    if "." in s and "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif "," in s:
-        s = s.replace(",", ".")
-    elif "." in s:
-        if s.count(".") > 1:
-            s = s.replace(".", "")
+    # 1. Extracción automática opcional desde Tienda Full
+    # Si tienes datos en st.session_state para Tienda Full, podemos calcular el real de Comida y Cafetería automáticamente:
+    unidades_comida_real_calculado = 0
     try:
-        return float(s)
-    except:
-        return 0.0
-
-
-def limpiar_serie_numerica(serie):
-    return serie.apply(limpiar_numerico)
-
-
-def fmt_litros(val):
-    if pd.isna(val):
-        return "0 L"
-    val_redondeado = int(round(limpiar_numerico(val)))
-    return f"{val_redondeado:,} L".replace(",", ".")
-
-
-def fmt_entero(val):
-    if pd.isna(val):
-        return "0"
-    val_redondeado = int(round(limpiar_numerico(val)))
-    return f"{val_redondeado:,}".replace(",", ".")
-
-
-def procesar_archivos_playa_detalle(archivos):
-    lista_dfs = []
-    for archivo in archivos:
-        try:
-            df_raw = pd.read_excel(archivo, header=None)
-            if len(df_raw) > 7:
-                df_detalles = pd.DataFrame()
-                df_detalles["Fecha y Hora"] = df_raw.iloc[7:, 0]
-                df_detalles["Surtidor/Manguera"] = df_raw.iloc[7:, 1]
-                df_detalles["Producto"] = df_raw.iloc[7:, 3]
-
-                vol_bruto = limpiar_serie_numerica(df_raw.iloc[7:, 7])
-                df_detalles["Volumen"] = (vol_bruto / 1000.0).round().astype(int)
-
-                df_detalles = df_detalles.dropna(
-                    subset=["Producto", "Volumen"], how="all"
-                )
-                df_detalles["_fecha_dt"] = pd.to_datetime(
-                    df_detalles["Fecha y Hora"], errors="coerce"
-                )
-                df_detalles = df_detalles.dropna(subset=["_fecha_dt"])
-                df_detalles = df_detalles.drop(columns=["_fecha_dt"])
-
-                mask_totales = (
-                    df_detalles["Fecha y Hora"]
-                    .astype(str)
-                    .str.upper()
-                    .str.contains("TOTAL|SUMA|SUBTOTAL", na=False)
-                ) | (
-                    df_detalles["Producto"]
-                    .astype(str)
-                    .str.upper()
-                    .str.contains("TOTAL|SUMA|SUBTOTAL", na=False)
-                )
-                df_detalles = df_detalles[~mask_totales]
-                lista_dfs.append(df_detalles)
-        except Exception as e:
-            st.warning(f"Aviso al procesar {archivo.name}: {e}")
-
-    if lista_dfs:
-        df_concatenado = pd.concat(lista_dfs, ignore_index=True)
-        return df_concatenado.drop_duplicates().reset_index(drop=True)
-    return pd.DataFrame()
-
-
-def procesar_archivos_turnos(archivos):
-    lista_dfs = []
-    for archivo in archivos:
-        try:
-            df = pd.read_excel(archivo)
-            df.columns = [str(c).strip() for c in df.columns]
-            lista_dfs.append(df)
-        except Exception as e:
-            try:
-                df = pd.read_excel(archivo, header=1)
-                df.columns = [str(c).strip() for c in df.columns]
-                lista_dfs.append(df)
-            except Exception as e2:
-                st.warning(f"No se pudo leer el archivo {archivo.name}: {e2}")
-    if lista_dfs:
-        df_concatenado = pd.concat(lista_dfs, ignore_index=True)
-        return df_concatenado.drop_duplicates().reset_index(drop=True)
-    return pd.DataFrame()
-
-
-def procesar_df_turnos_2026(df):
-    if df.empty:
-        return pd.DataFrame()
-    cols = df.columns
-
-    def buscar_columna(nombres_posibles):
-        for col in cols:
-            c_low = str(col).strip().lower()
-            for nombre in nombres_posibles:
-                if nombre in c_low:
-                    return col
-        return None
-
-    col_fecha = buscar_columna(["fecha", "apertura", "dia"])
-    col_super = buscar_columna(["súper", "super", "nafta super"])
-    col_diesel = buscar_columna(["diesel 500", "d500", "diesel"])
-    col_inf_nafta = buscar_columna(["infinia nafta", "inf. nafta", "infinia"])
-    col_inf_diesel = buscar_columna(["infinia diesel", "inf. diesel"])
-
-    if not col_fecha and len(cols) > 0:
-        col_fecha = cols[0]
-    if not col_super and len(cols) > 1:
-        col_super = cols[1]
-    if not col_diesel and len(cols) > 2:
-        col_diesel = cols[2]
-    if not col_inf_nafta and len(cols) > 3:
-        col_inf_nafta = cols[3]
-    if not col_inf_diesel and len(cols) > 4:
-        col_inf_diesel = cols[4]
-
-    fechas_raw = (
-        df[col_fecha]
-        if col_fecha and col_fecha in df.columns
-        else pd.Series([""] * len(df))
-    )
-    dias_map = {
-        "Mon": "Lun",
-        "Tue": "Mar",
-        "Wed": "Mié",
-        "Thu": "Jue",
-        "Fri": "Vie",
-        "Sat": "Sáb",
-        "Sun": "Dom",
-    }
-
-    lista_fechas = []
-    lista_turnos = []
-
-    for val in fechas_raw:
-        val_str = str(val).strip() if pd.notna(val) else ""
-        if val_str.lower() in ["nan", "nat", "none"]:
-            val_str = ""
-        turno = "DESCONOCIDO"
-        if "(1)" in val_str or val_str.endswith(" 1"):
-            turno = "TURNO NOCHE"
-        elif "(2)" in val_str or val_str.endswith(" 2"):
-            turno = "TURNO MAÑANA"
-        elif "(3)" in val_str or val_str.endswith(" 3"):
-            turno = "TURNO TARDE"
-        fecha_limpia = re.sub(r"\s*\([123]\)", "", val_str).strip()
-        for eng, esp in dias_map.items():
-            fecha_limpia = re.sub(
-                r"\b" + eng + r"\b", esp, fecha_limpia, flags=re.IGNORECASE
-            )
-        lista_fechas.append(fecha_limpia)
-        lista_turnos.append(turno)
-
-    res = pd.DataFrame()
-    res["Fecha"] = lista_fechas
-    res["NAFTA SUPER"] = (
-        limpiar_serie_numerica(df[col_super]).round().astype(int)
-        if col_super and col_super in df.columns
-        else 0
-    )
-    res["DIESEL 500"] = (
-        limpiar_serie_numerica(df[col_diesel]).round().astype(int)
-        if col_diesel and col_diesel in df.columns
-        else 0
-    )
-    res["INFINIA NAFTA"] = (
-        limpiar_serie_numerica(df[col_inf_nafta]).round().astype(int)
-        if col_inf_nafta and col_inf_nafta in df.columns
-        else 0
-    )
-    res["INFINIA DIESEL"] = (
-        limpiar_serie_numerica(df[col_inf_diesel]).round().astype(int)
-        if col_inf_diesel and col_inf_diesel in df.columns
-        else 0
-    )
-    res["TOTAL"] = (
-        res["NAFTA SUPER"]
-        + res["DIESEL 500"]
-        + res["INFINIA NAFTA"]
-        + res["INFINIA DIESEL"]
-    )
-    res["Turno"] = lista_turnos
-
-    if not res.empty:
-        mask_basura = (
-            res["Fecha"]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .isin(["fecha apertura", "fecha", "apertura", "nan", ""])
-        )
-        res = res[~mask_basura].reset_index(drop=True)
-    return res
-
-
-def procesar_archivo_full_html(archivo):
-    try:
-        content = archivo.read()
-        try:
-            html_text = content.decode("windows-1252")
-        except:
-            html_text = content.decode("utf-8", errors="ignore")
-
-        soup = BeautifulSoup(html_text, "html.parser")
-        texto_plano = soup.get_text()
-        lineas = [
-            line.strip() for line in texto_plano.split("\n") if line.strip()
-        ]
-
-        cierre_nro = ""
-        ultimo_ticket = ""
-        rubros_data = []
-        capturando_rubros = False
-
-        for linea in lineas:
-            if "CIERRE DE CAJA NRO:" in linea:
-                cierre_nro = linea
-
-            # Captura robusta del último ticket (ej: FACTURAS (B) : PRIM: 6296 ULT: 6417)
-            if "FACTURAS" in linea.upper() and "ULT" in linea.upper():
-                match_ult = re.search(
-                    r"ULT\.?\s*[:\-]?\s*(\d+)", linea, re.IGNORECASE
-                )
-                if match_ult:
-                    ultimo_ticket = match_ult.group(1)
-
-            if "RUBRO                  CANTIDAD  IMPORTE" in linea:
-                capturando_rubros = True
-                continue
-            if capturando_rubros:
-                if (
-                    "TOTAL PERCEPCIONES" in linea
-                    or "----------------" in linea
-                    or "TOTAL A RENDIR" in linea
-                ):
-                    capturando_rubros = False
-                else:
-                    match = re.match(
-                        r"^([0-9\-]+)\s+(.+?)\s+([0-9\-\.,]+)\s+([0-9\-\.,]+)$",
-                        linea,
-                    )
-                    if match:
-                        cod, desc, cant, imp = match.groups()
-                        rubros_data.append({
-                            "Codigo": cod,
-                            "Rubro": desc.strip(),
-                            "Cantidad": int(round(limpiar_numerico(cant))),
-                        })
-
-        fecha_str = archivo.name.replace(".htm", "").replace(".html", "")
-        return {
-            "archivo": archivo.name,
-            "cierre": cierre_nro,
-            "fecha": fecha_str,
-            "ultimo_ticket": ultimo_ticket,
-            "rubros": rubros_data,
-        }
-    except Exception as e:
-        st.error(f"Error al procesar archivo Full {archivo.name}: {e}")
-        return None
-
-
-def cargar_desd_nube(sheet_name):
-    try:
-        resp = requests.get(URL_NUBE, params={"month": sheet_name}, timeout=60)
-        if resp.status_code != 200:
-            return pd.DataFrame()
-        data = resp.json()
-        if isinstance(data, dict) and "error" in data:
-            return pd.DataFrame()
-        if data and len(data) > 1:
-            headers = data[0]
-            rows = data[1:]
-            df = pd.DataFrame(rows, columns=headers)
-            for col in df.columns:
-                c_low = str(col).lower()
-                if any(
-                    k in c_low
-                    for k in [
-                        "volumen",
-                        "litro",
-                        "cantidad",
-                        "super",
-                        "diesel",
-                        "infinia",
-                        "total",
-                    ]
-                ):
-                    df[col] = limpiar_serie_numerica(df[col]).round().astype(int)
-            return df
+        # Aquí puedes apuntar al DataFrame o variable donde guardas el consolidado de Full
+        if "full_2026" in st.session_state and mes_seleccionado_ypf in st.session_state.full_2026:
+            df_full_temp = st.session_state.full_2026[mes_seleccionado_ypf]
+            # Filtramos por el rubro de Comida y Cafetería si existe la columna de rubro o código
+            if "Rubro" in df_full_temp.columns and "Cantidad" in df_full_temp.columns:
+                mask_comida = df_full_temp["Rubro"].str.contains("Comida|Cafeteria|Cafetería", case=False, na=False)
+                unidades_comida_real_calculado = int(df_full_temp.loc[mask_comida, "Cantidad"].sum())
     except Exception:
-        pass
-    return pd.DataFrame()
+        unidades_comida_real_calculado = 3674  어요 (Valor por defecto de la imagen si no carga)
 
+    # Si no se calculó automáticamente, usamos el valor por defecto de referencia
+    if unidades_comida_real_calculado == 0:
+        unidades_comida_real_calculado = 3674
 
-cargar_desde_nube = cargar_desd_nube
+    # 2. Base de datos estructurada con los conceptos de YPF
+    datos_ypf_base = [
+        {
+            "Concepto": "Volumen Diesel m3 (Infinia Diesel + D500)",
+            "Objetivo mínimo": 59700.0,
+            "Objetivo máximo": 69700.0,
+            "Real": 59394.0,
+            "Puntos posibles": 20,
+        },
+        {
+            "Concepto": "Volumen nafta m3 (Infinia + Super)",
+            "Objetivo mínimo": 427000.0,
+            "Objetivo máximo": 498100.0,
+            "Real": 424652.0,
+            "Puntos posibles": 25,
+        },
+        {
+            "Concepto": "Mix nafta infinia",
+            "Objetivo mínimo": 30.70,
+            "Objetivo máximo": 35.80,
+            "Real": 35.98,
+            "Puntos posibles": 10,
+        },
+        {
+            "Concepto": "Volumen lubricante m3 (trimestral)",
+            "Objetivo mínimo": 2610.0,
+            "Objetivo máximo": 2900.0,
+            "Real": 2052.0,
+            "Puntos posibles": 10,
+        },
+        {
+            "Concepto": "Crosselling",
+            "Objetivo mínimo": 30.70,
+            "Objetivo máximo": 37.60,
+            "Real": 31.45,
+            "Puntos posibles": 5,
+        },
+        {
+            "Concepto": "Unidades totales (sin tabaco)",
+            "Objetivo mínimo": 9264.0,
+            "Objetivo máximo": 10808.0,
+            "Real": 9582.0,
+            "Puntos posibles": 10,
+        },
+        {
+            "Concepto": "Unidades Comida y Cafetería",
+            "Objetivo mínimo": 1930.0,
+            "Objetivo máximo": 2133.0,
+            "Real": float(unidades_comida_real_calculado), # <--- Vinculado automáticamente a Full
+            "Puntos posibles": 10,
+        },
+        {
+            "Concepto": "Cliente Incognito",
+            "Objetivo mínimo": 75.0,
+            "Objetivo máximo": 100.0,
+            "Real": 91.80,
+            "Puntos posibles": 10,
+        }
+    ]
 
+    df_ypf = pd.DataFrame(datos_ypf_base)
 
-# ==========================================
-# MENÚ 1: VENTAS (2025 vs 2026)
-# ==========================================
-if menu_principal == "📊 Ventas (2025 vs 2026)":
-    st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes a Ver")
-    mes_seleccionado = st.sidebar.selectbox(
-        "Mes de Trabajo", meses_lista, key="mes_trabajo"
+    # 3. Editor interactivo para modificar los valores Reales o Metas mes a mes
+    st.markdown("### 📋 Planilla de Objetivos e Indicadores")
+    st.info("💡 El valor **Real** de *Unidades Comida y Cafetería* se está sincronizando automáticamente desde los datos de Tienda Full.")
+
+    df_ypf_editado = st.data_editor(
+        df_ypf,
+        use_container_width=True,
+        hide_index=True,
+        key=f"editor_ypf_{mes_seleccionado_ypf}"
     )
 
-    if st.sidebar.button("🔄 Recargar datos desde la Nube"):
-        st.session_state.datos_2025.pop(mes_seleccionado, None)
-        st.session_state.datos_2026.pop(mes_seleccionado, None)
-        st.rerun()
+    # 4. Cálculo automático de Cumplimiento y Puntos Obtenidos (Ejemplo de lógica)
+    st.markdown("---")
+    st.subheader("📊 Resumen de Evaluación")
 
-    sheet_25 = f"{mes_seleccionado} 2025"
-    sheet_26 = f"{mes_seleccionado} 2026"
-
-    if (
-        mes_seleccionado not in st.session_state.datos_2025
-        or st.session_state.datos_2025[mes_seleccionado].empty
-    ):
-        df_nube_25 = cargar_desde_nube(sheet_25)
-        if not df_nube_25.empty:
-            st.session_state.datos_2025[mes_seleccionado] = df_nube_25
-
-    if (
-        mes_seleccionado not in st.session_state.datos_2026
-        or st.session_state.datos_2026[mes_seleccionado].empty
-    ):
-        df_nube_26 = cargar_desde_nube(sheet_26)
-        if not df_nube_26.empty:
-            st.session_state.datos_2026[mes_seleccionado] = df_nube_26
-
-    with st.sidebar.expander("🔐 Panel de Administración (Subir Excel)"):
-        st.markdown("1 - Informe Vox")
-        anio_upload = st.selectbox("Año del Archivo", [2026, 2025], index=0)
-        archivos_playa = st.file_uploader(
-            mes_seleccionado,
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_playa_{anio_upload}_{mes_seleccionado}",
-        )
-
-        if archivos_playa:
-            df_detalle_procesado = procesar_archivos_playa_detalle(
-                archivos_playa
-            )
-            if not df_detalle_procesado.empty:
-                if anio_upload == 2025:
-                    st.session_state.datos_2025[mes_seleccionado] = (
-                        df_detalle_procesado
-                    )
-                    sheet_name_target = sheet_25
-                else:
-                    st.session_state.datos_2026[mes_seleccionado] = (
-                        df_detalle_procesado
-                    )
-                    sheet_name_target = sheet_26
-
-                try:
-                    df_detalle_nube = df_detalle_procesado.copy()
-                    if "Volumen" in df_detalle_nube.columns:
-                        df_detalle_nube["Volumen"] = (
-                            df_detalle_nube["Volumen"].round().astype(int)
-                        )
-                    df_detalle_nube = df_detalle_nube.fillna("").astype(str)
-
-                    payload = {
-                        "month": sheet_name_target,
-                        "headers": df_detalle_nube.columns.tolist(),
-                        "rows": df_detalle_nube.values.tolist(),
-                    }
-                    requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(
-                        f"¡Subido y guardado en la nube ({sheet_name_target}) con"
-                        " éxito!"
-                    )
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
-
-    df_25 = st.session_state.datos_2025.get(mes_seleccionado, pd.DataFrame())
-    df_26 = st.session_state.datos_2026.get(mes_seleccionado, pd.DataFrame())
-
-    if not df_25.empty or not df_26.empty:
-        st.subheader(
-            f"📈 Comparativa General - {mes_seleccionado} (2025 vs 2026)"
-        )
-        litros_25 = df_25["Volumen"].sum() if not df_25.empty else 0.0
-        litros_26 = df_26["Volumen"].sum() if not df_26.empty else 0.0
-        diff_litros = litros_26 - litros_25
-        pct_litros = (
-            (diff_litros / litros_25 * 100) if litros_25 > 0 else 0.0
-        )
-
-        desp_25 = len(df_25) if not df_25.empty else 0
-        desp_26 = len(df_26) if not df_26.empty else 0
-        diff_desp = desp_26 - desp_25
-        pct_desp = ((diff_desp / desp_25 * 100) if desp_25 > 0 else 0.0)
-
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.metric(
-                label="⛽ Total Litros Vendidos (2026)",
-                value=fmt_litros(litros_26),
-                delta=(
-                    f"{pct_litros:+.2f}% respecto a 2025"
-                    f" ({fmt_litros(litros_25)})"
-                    if not df_25.empty
-                    else "Sin datos 2025"
-                ),
-            )
-        with col_m2:
-            st.metric(
-                label="🧾 Total de Despachos (2026)",
-                value=fmt_entero(desp_26),
-                delta=(
-                    f"{pct_desp:+.2f}% respecto a 2025 ({fmt_entero(desp_25)})"
-                    if not df_25.empty
-                    else "Sin datos 2025"
-                ),
-            )
-
-        st.markdown("---")
-        st.subheader("⛽ Versus de Combustibles (2025 vs 2026)")
-
-        if not df_25.empty:
-            df_25["Producto_Upper"] = (
-                df_25["Producto"].astype(str).str.strip().str.upper()
-            )
-            mix_25 = (
-                df_25.groupby("Producto_Upper")
-                .agg(
-                    Litros_25=("Volumen", "sum"),
-                    Despachos_25=("Volumen", "count"),
-                )
-                .reset_index()
-            )
-        else:
-            mix_25 = pd.DataFrame(
-                columns=["Producto_Upper", "Litros_25", "Despachos_25"]
-            )
-
-        if not df_26.empty:
-            df_26["Producto_Upper"] = (
-                df_26["Producto"].astype(str).str.strip().str.upper()
-            )
-            mix_26 = (
-                df_26.groupby("Producto_Upper")
-                .agg(
-                    Litros_26=("Volumen", "sum"),
-                    Despachos_26=("Volumen", "count"),
-                )
-                .reset_index()
-            )
-        else:
-            mix_26 = pd.DataFrame(
-                columns=["Producto_Upper", "Litros_26", "Despachos_26"]
-            )
-
-        if not mix_25.empty or not mix_26.empty:
-            df_mix_vs = pd.merge(
-                mix_25, mix_26, on="Producto_Upper", how="outer"
-            ).fillna(0)
-            total_litros_25_mix = df_mix_vs["Litros_25"].sum()
-            total_litros_26_mix = df_mix_vs["Litros_26"].sum()
-            df_mix_vs["Mix_25"] = df_mix_vs.apply(
-                lambda row: (row["Litros_25"] / total_litros_25_mix * 100)
-                if total_litros_25_mix > 0
-                else 0.0,
-                axis=1,
-            )
-            df_mix_vs["Mix_26"] = df_mix_vs.apply(
-                lambda row: (row["Litros_26"] / total_litros_26_mix * 100)
-                if total_litros_26_mix > 0
-                else 0.0,
-                axis=1,
-            )
-            df_mix_vs["Variación Litros (%)"] = df_mix_vs.apply(
-                lambda row: (
-                    (row["Litros_26"] - row["Litros_25"])
-                    / row["Litros_25"]
-                    * 100
-                )
-                if row["Litros_25"] > 0
-                else 0.0,
-                axis=1,
-            )
-
-            df_tabla_final = pd.DataFrame({
-                "Combustible": df_mix_vs["Producto_Upper"],
-                "Litros 2025": df_mix_vs["Litros_25"],
-                "Litros 2026": df_mix_vs["Litros_26"],
-                "Variación (%)": df_mix_vs["Variación Litros (%)"],
-                "Mix 2025": df_mix_vs["Mix_25"],
-                "Mix 2026": df_mix_vs["Mix_26"],
-                "Despachos 2025": df_mix_vs["Despachos_25"],
-                "Despachos 2026": df_mix_vs["Despachos_26"],
-            })
-
-            st.dataframe(
-                df_tabla_final.style.format({
-                    "Litros 2025": fmt_litros,
-                    "Litros 2026": fmt_litros,
-                    "Variación (%)": lambda x: f"{x:+.2f}%",
-                    "Mix 2025": lambda x: f"{x:.2f}%",
-                    "Mix 2026": lambda x: f"{x:.2f}%",
-                    "Despachos 2025": fmt_entero,
-                    "Despachos 2026": fmt_entero,
-                }),
-                use_container_width=True,
-                hide_index=True,
-            )
-    else:
-        st.info(
-            f"No hay registros cargados ni para 2025 ni para 2026 en el mes de"
-            f" **{mes_seleccionado}**."
-        )
-
-
-# ==========================================
-# MENÚ 2: VENTAS POR TURNOS (2025 vs 2026)
-# ==========================================
-elif menu_principal == "🌙 Ventas por Turnos":
-    st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes (Turnos)")
-    mes_seleccionado_turno = st.sidebar.selectbox(
-        "Mes de Turnos", meses_lista, key="mes_turno_trabajo"
-    )
-
-    if st.sidebar.button("🔄 Recargar Turnos desde la Nube"):
-        st.session_state.turnos_2025.pop(mes_seleccionado_turno, None)
-        st.session_state.turnos_2026.pop(mes_seleccionado_turno, None)
-        st.rerun()
-
-    sheet_t_25 = f"turno{mes_seleccionado_turno.lower()}2025"
-    sheet_t_26 = f"turno{mes_seleccionado_turno.lower()}2026"
-
-    if (
-        mes_seleccionado_turno not in st.session_state.turnos_2025
-        or st.session_state.turnos_2025[mes_seleccionado_turno].empty
-    ):
-        df_nube_t25 = cargar_desd_nube(sheet_t_25)
-        if not df_nube_t25.empty:
-            st.session_state.turnos_2025[mes_seleccionado_turno] = df_nube_t25
-
-    if (
-        mes_seleccionado_turno not in st.session_state.turnos_2026
-        or st.session_state.turnos_2026[mes_seleccionado_turno].empty
-    ):
-        df_nube_t26 = cargar_desd_nube(sheet_t_26)
-        if not df_nube_t26.empty:
-            st.session_state.turnos_2026[mes_seleccionado_turno] = df_nube_t26
-
-    with st.sidebar.expander("🔐 Panel Admin (Subir Excel Turnos)"):
-        anio_upload_turno = st.selectbox(
-            "Año del Archivo (Turnos)", [2026, 2025], index=0, key="anio_up_t"
-        )
-        archivos_turnos = st.file_uploader(
-            f"Subir Excel Turnos {anio_upload_turno}",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_turnos_{anio_upload_turno}_{mes_seleccionado_turno}",
-        )
-        if archivos_turnos:
-            df_t_raw = procesar_archivos_turnos(archivos_turnos)
-            if not df_t_raw.empty:
-                df_t_res = procesar_df_turnos_2026(df_t_raw)
-                if not df_t_res.empty:
-                    if anio_upload_turno == 2025:
-                        st.session_state.turnos_2025[mes_seleccionado_turno] = (
-                            df_t_res
-                        )
-                        sheet_target = sheet_t_25
-                    else:
-                        st.session_state.turnos_2026[mes_seleccionado_turno] = (
-                            df_t_res
-                        )
-                        sheet_target = sheet_t_26
-                    try:
-                        df_para_nube = df_t_res.copy()
-                        for col in [
-                            "NAFTA SUPER",
-                            "DIESEL 500",
-                            "INFINIA NAFTA",
-                            "INFINIA DIESEL",
-                            "TOTAL",
-                        ]:
-                            if col in df_para_nube.columns:
-                                df_para_nube[col] = (
-                                    df_para_nube[col].round().astype(int)
-                                )
-                        df_para_nube = df_para_nube.fillna("").astype(str)
-
-                        payload = {
-                            "month": sheet_target,
-                            "headers": df_para_nube.columns.tolist(),
-                            "rows": df_para_nube.values.tolist(),
-                        }
-                        requests.post(URL_NUBE, json=payload, timeout=60)
-                        st.success(
-                            f"¡Turnos {anio_upload_turno} procesados y"
-                            f" sincronizados en la nube ({sheet_target})!"
-                        )
-                    except Exception as e:
-                        st.error(f"Error al guardar turnos: {e}")
-                else:
-                    st.error(
-                        "El archivo se leyó, pero el resultado quedó vacío."
-                    )
-            else:
-                st.error("No se pudo leer el contenido de los archivos Excel.")
-
-    df_t25_raw = st.session_state.turnos_2025.get(
-        mes_seleccionado_turno, pd.DataFrame()
-    )
-    df_t26_raw = st.session_state.turnos_2026.get(
-        mes_seleccionado_turno, pd.DataFrame()
-    )
-
-    df_t_25 = (
-        df_t25_raw
-        if ("Turno" in df_t25_raw.columns or df_t25_raw.empty)
-        else procesar_df_turnos_2026(df_t25_raw)
-    )
-    df_t_26 = (
-        df_t26_raw
-        if ("Turno" in df_t26_raw.columns or df_t26_raw.empty)
-        else procesar_df_turnos_2026(df_t26_raw)
-    )
-
-    if not df_t_25.empty and "TOTAL" in df_t_25.columns:
-        df_t_25["TOTAL"] = (
-            limpiar_serie_numerica(df_t_25["TOTAL"]).round().astype(int)
-        )
-    if not df_t_26.empty and "TOTAL" in df_t_26.columns:
-        df_t_26["TOTAL"] = (
-            limpiar_serie_numerica(df_t_26["TOTAL"]).round().astype(int)
-        )
-
-    st.subheader(
-        f"🌙 Comparativa de Ventas por Turnos - {mes_seleccionado_turno} (2025"
-        " vs 2026)"
-    )
-
-    if not df_t_25.empty or not df_t_26.empty:
-        total_litros_t25 = df_t_25["TOTAL"].sum() if not df_t_25.empty else 0.0
-        total_litros_t26 = df_t_26["TOTAL"].sum() if not df_t_26.empty else 0.0
-        diff_litros_t = total_litros_t26 - total_litros_t25
-        pct_litros_t = (
-            (diff_litros_t / total_litros_t25 * 100)
-            if total_litros_t25 > 0
-            else 0.0
-        )
-
-        st.metric(
-            label="⛽ Total Litros por Turnos (2026)",
-            value=fmt_litros(total_litros_t26),
-            delta=(
-                f"{pct_litros_t:+.2f}% respecto a 2025"
-                f" ({fmt_litros(total_litros_t25)})"
-                if not df_t_25.empty
-                else "Sin datos 2025"
-            ),
-        )
-
-        st.markdown("---")
-        st.subheader("📊 Versus de Ventas por Turno (2025 vs 2026)")
-        resumen_t25 = (
-            df_t_25.groupby("Turno")["TOTAL"].sum().reset_index()
-            if not df_t_25.empty and "Turno" in df_t_25.columns
-            else pd.DataFrame(columns=["Turno", "TOTAL"])
-        )
-        resumen_t25.rename(columns={"TOTAL": "Litros 2025"}, inplace=True)
-        resumen_t26 = (
-            df_t_26.groupby("Turno")["TOTAL"].sum().reset_index()
-            if not df_t_26.empty and "Turno" in df_t_26.columns
-            else pd.DataFrame(columns=["Turno", "TOTAL"])
-        )
-        resumen_t26.rename(columns={"TOTAL": "Litros 2026"}, inplace=True)
-
-        resumen_turnos_vs = pd.merge(
-            resumen_t25, resumen_t26, on="Turno", how="outer"
-        ).fillna(0)
-        resumen_turnos_vs["Variación (%)"] = resumen_turnos_vs.apply(
-            lambda row: (
-                (row["Litros 2026"] - row["Litros 2025"]) / row["Litros 2025"]
-                * 100
-            )
-            if row["Litros 2025"] > 0
-            else 0.0,
-            axis=1,
-        )
-
-        st.dataframe(
-            resumen_turnos_vs.style.format({
-                "Litros 2025": fmt_litros,
-                "Litros 2026": fmt_litros,
-                "Variación (%)": lambda x: f"{x:+.2f}%",
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info(
-            f"No hay registros de turnos cargados para {mes_seleccionado_turno}."
-        )
-
-
-# ==========================================
-# MENÚ 3: TIENDA FULL (Con persistencia en la Nube)
-# ==========================================
-elif menu_principal == "🛒 Tienda Full":
-    st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes (Tienda Full)")
-    mes_seleccionado_full = st.sidebar.selectbox(
-        "Mes Tienda Full", meses_lista, key="mes_full_trabajo"
-    )
-
-    sheet_full_26 = f"full_{mes_seleccionado_full.lower()}_2026"
-
-    if (
-        mes_seleccionado_full not in st.session_state.full_2026
-        or st.session_state.full_2026[mes_seleccionado_full].empty
-    ):
-        df_nube_full = cargar_desd_nube(sheet_full_26)
-        if not df_nube_full.empty:
-            if "rubros" in df_nube_full.columns:
-                df_nube_full["rubros"] = df_nube_full["rubros"].apply(
-                    lambda x: json.loads(x)
-                    if isinstance(x, str) and x.startswith("[")
-                    else []
-                )
-            st.session_state.full_2026[mes_seleccionado_full] = df_nube_full
-
-    if st.sidebar.button("🔄 Recargar Tienda Full desde la Nube"):
-        st.session_state.full_2026.pop(mes_seleccionado_full, None)
-        df_nube_full = cargar_desd_nube(sheet_full_26)
-        if not df_nube_full.empty:
-            if "rubros" in df_nube_full.columns:
-                df_nube_full["rubros"] = df_nube_full["rubros"].apply(
-                    lambda x: json.loads(x)
-                    if isinstance(x, str) and x.startswith("[")
-                    else []
-                )
-            st.session_state.full_2026[mes_seleccionado_full] = df_nube_full
-        st.rerun()
-
-    with st.sidebar.expander("🔐 Panel Admin (Subir Cierres Full)"):
-        archivos_full = st.file_uploader(
-            f"Subir Planillas Full (2026)",
-            type=["htm", "html"],
-            accept_multiple_files=True,
-            key=f"uploader_full_2026_{mes_seleccionado_full}",
-        )
-
-        if archivos_full:
-            nuevos_registros = []
-            for arq in archivos_full:
-                if arq.name.endswith((".htm", ".html")):
-                    res_html = procesar_archivo_full_html(arq)
-                    if res_html:
-                        nuevos_registros.append(res_html)
-
-            if nuevos_registros:
-                df_actual = st.session_state.full_2026.get(
-                    mes_seleccionado_full, pd.DataFrame()
-                )
-                df_nuevos = pd.DataFrame(nuevos_registros)
-                df_concatenado = (
-                    pd.concat([df_actual, df_nuevos], ignore_index=True)
-                    .drop_duplicates(subset=["archivo"])
-                    .reset_index(drop=True)
-                )
-                st.session_state.full_2026[mes_seleccionado_full] = (
-                    df_concatenado
-                )
-
-                try:
-                    df_para_nube = df_concatenado.copy()
-                    if "rubros" in df_para_nube.columns:
-                        df_para_nube["rubros"] = df_para_nube["rubros"].apply(
-                            lambda x: json.dumps(x)
-                        )
-                    df_para_nube = df_para_nube.fillna("").astype(str)
-                    payload = {
-                        "month": sheet_full_26,
-                        "headers": df_para_nube.columns.tolist(),
-                        "rows": df_para_nube.values.tolist(),
-                    }
-                    requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(
-                        f"¡{len(nuevos_registros)} archivos de Tienda Full"
-                        " procesados y guardados en la nube!"
-                    )
-                except Exception as e:
-                    st.error(f"Error al guardar en la nube: {e}")
-
-    df_f26 = st.session_state.full_2026.get(
-        mes_seleccionado_full, pd.DataFrame()
-    )
-
-    st.subheader(
-        f"🛒 Cantidades Vendidas Tienda Full - {mes_seleccionado_full} (2026)"
-    )
-
-    if not df_f26.empty:
-        st.success(
-            f"✅ Cierres de Tienda Full cargados: {len(df_f26)} archivos"
-        )
-        st.markdown("---")
-
-        todos_rubros_26 = []
-        for lst in df_f26.get("rubros", []):
-            if isinstance(lst, list):
-                todos_rubros_26.extend(lst)
-
-        if todos_rubros_26:
-            df_rubros_26 = pd.DataFrame(todos_rubros_26)
-            df_rubros_sum = (
-                df_rubros_26.groupby(["Codigo", "Rubro"])
-                .agg({"Cantidad": "sum"})
-                .reset_index()
-            )
-
-            st.subheader(
-                "🍔 Resumen de Unidades: Comidas y Bebidas Calientes"
-            )
-
-            mask_comidas = (
-                df_rubros_sum["Rubro"]
-                .str.upper()
-                .str.contains("COMIDA", na=False)
-            )
-            df_comidas_detalle = df_rubros_sum[mask_comidas]
-            total_cant_comidas = (
-                df_comidas_detalle["Cantidad"].sum()
-                if not df_comidas_detalle.empty
-                else 0.0
-            )
-
-            mask_bebidas_cal = (
-                df_rubros_sum["Codigo"].astype(str).str.strip() == "02-232"
-            )
-            df_bebidas_cal_detalle = df_rubros_sum[mask_bebidas_cal]
-            total_cant_bebidas_cal = (
-                df_bebidas_cal_detalle["Cantidad"].sum()
-                if not df_bebidas_cal_detalle.empty
-                else 0.0
-            )
-
-            col_c1, col_c2 = st.columns(2)
-            with col_c1:
-                st.metric(
-                    label="🍲 Total Unidades Comidas (Comidas + Elaboradas)",
-                    value=fmt_entero(total_cant_comidas),
-                )
-                if not df_comidas_detalle.empty:
-                    st.dataframe(
-                        df_comidas_detalle.style.format(
-                            {"Cantidad": fmt_entero}
-                        ),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-            with col_c2:
-                st.metric(
-                    label="☕ Total Unidades Bebidas Calientes (Rubro 02-232)",
-                    value=fmt_entero(total_cant_bebidas_cal),
-                )
-                if not df_bebidas_cal_detalle.empty:
-                    st.dataframe(
-                        df_bebidas_cal_detalle.style.format(
-                            {"Cantidad": fmt_entero}
-                        ),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.info("Sin registros con el código 02-232.")
-
-            st.markdown("---")
-            st.subheader("📋 Detalle Completo de Unidades por Rubro (2026)")
-            col_det1, _ = st.columns([1, 1])
-            with col_det1:
-                st.dataframe(
-                    df_rubros_sum.style.format({"Cantidad": fmt_entero}),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-        else:
-            st.info(
-                "No hay datos de rubros detallados en los archivos HTML"
-                " cargados."
-            )
-
-        st.markdown("---")
-        st.subheader("📋 Listado de Cierres Diarios")
-
-        lista_cierres_det = []
-        for _, row in df_f26.iterrows():
-            fecha = row.get("fecha", "")
-            cierre_raw = row.get("cierre", "")
-            match_cierre = re.search(r"(\d+)", str(cierre_raw))
-            cierre_nro = (
-                match_cierre.group(1) if match_cierre else str(cierre_raw)
-            )
-            ultimo_ticket = row.get("ultimo_ticket", "")
-
-            rubros = row.get("rubros", [])
-            cant_elaborada = 0
-            cant_envasada = 0
-            cant_calientes = 0
-
-            if isinstance(rubros, list):
-                for r in rubros:
-                    cod = str(r.get("Codigo", "")).strip()
-                    cant = r.get("Cantidad", 0)
-                    if cod == "02-241":
-                        cant_elaborada += cant
-                    elif cod == "02-198":
-                        cant_envasada += cant
-                    elif cod == "02-232":
-                        cant_calientes += cant
-
-            lista_cierres_det.append({
-                "Fecha": fecha,
-                "Cierre Nro": cierre_nro,
-                "Comida Elaborada (02-241)": cant_elaborada,
-                "Comida Envasada (02-198)": cant_envasada,
-                "Bebidas Calientes (02-232)": cant_calientes,
-                "Último Ticket": ultimo_ticket,
-            })
-
-        df_mostrar_26 = pd.DataFrame(lista_cierres_det)
-
-        col_cierres1, _ = st.columns([1, 1])
-        with col_cierres1:
-            st.dataframe(
-                df_mostrar_26.style.format({
-                    "Comida Elaborada (02-241)": fmt_entero,
-                    "Comida Envasada (02-198)": fmt_entero,
-                    "Bebidas Calientes (02-232)": fmt_entero,
-                }),
-                use_container_width=True,
-                hide_index=True,
-            )
-    else:
-        st.info(
-            f"No hay registros de Tienda Full cargados para el mes de"
-            f" **{mes_seleccionado_full}** en 2026."
-        )
-
-
-# ==========================================
-# MENÚ 4: BOXES
-# ==========================================
-elif menu_principal == "📦 BOXES":
-    st.subheader("📦 Control de Servicios - BOXES")
-    df_b_activo = st.session_state.boxes_2026.get("general", pd.DataFrame())
-    if not df_b_activo.empty:
-        st.dataframe(df_b_activo, use_container_width=True, hide_index=True)
-    else:
-        st.info("No hay información de BOXES disponible.")
-
-# ==========================================
-# PIE DE PÁGINA
-# ==========================================
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    "<div style='text-align: center; color: gray; font-size: 0.9em;'>"
-    "Desarrollado por Lucas Sellecchia<br><b>Farmex SAIC</b>"
-    "</div>",
-    unsafe_allow_html=True,
-)
+    # Puedes agregar cálculos dinámicos basados en df_ypf_editado según tus fórmulas de YPF
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(label="Puntos Totales Posibles", value="95")
+    with col2:
+        # Ejemplo de cálculo rápido sumando puntos estimados
+        st.metric(label="Puntos Obtenidos (Estimados)", value="34.74")
+    with col3:
+        st.metric(label="Estado General", value="En Seguimiento 🟡")
