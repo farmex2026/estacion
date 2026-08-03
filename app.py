@@ -130,15 +130,11 @@ elif menu_principal == "🛒 Tienda Full":
                 else 0.0
             )
 
-            # Filtro amplio y robusto para Bebidas Calientes / Cafetería / Infusiones
+            # Filtro exacto para tomar únicamente el rubro de Bebidas Calientes
             mask_bebidas_cal = (
                 df_rubros_sum["Rubro"]
                 .str.upper()
-                .str.contains(
-                    "CALIENTE|CAFE|CAFÉ|TÉ|TE|CAFETERIA|INFUSION|CHOCOLATE|CAPPUCCINO|SUBMARINO|LATTE",
-                    na=False,
-                    regex=True,
-                )
+                .str.contains("BEBIDAS CALIENTES", na=False)
             )
             df_bebidas_cal_detalle = df_rubros_sum[mask_bebidas_cal]
             total_cant_bebidas_cal = (
