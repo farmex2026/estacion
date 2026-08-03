@@ -111,7 +111,8 @@ def procesar_archivos_playa_detalle(archivos):
                 df_detalles["Producto"] = df_raw.iloc[7:, 3]
 
                 vol_bruto = limpiar_serie_numerica(df_raw.iloc[7:, 7])
-                df_detalles["Volumen"] = vol_bruto / 1000.0
+                # Redondeo estricto a entero para evitar decimales corruptos o gigantes
+                df_detalles["Volumen"] = (vol_bruto / 1000.0).round().astype(int)
 
                 df_detalles = df_detalles.dropna(
                     subset=["Producto", "Volumen"], how="all"
@@ -234,24 +235,24 @@ def procesar_df_turnos_2026(df):
     res = pd.DataFrame()
     res["Fecha"] = lista_fechas
     res["NAFTA SUPER"] = (
-        limpiar_serie_numerica(df[col_super])
+        limpiar_serie_numerica(df[col_super]).round().astype(int)
         if col_super and col_super in df.columns
-        else 0.0
+        else 0
     )
     res["DIESEL 500"] = (
-        limpiar_serie_numerica(df[col_diesel])
+        limpiar_serie_numerica(df[col_diesel]).round().astype(int)
         if col_diesel and col_diesel in df.columns
-        else 0.0
+        else 0
     )
     res["INFINIA NAFTA"] = (
-        limpiar_serie_numerica(df[col_inf_nafta])
+        limpiar_serie_numerica(df[col_inf_nafta]).round().astype(int)
         if col_inf_nafta and col_inf_nafta in df.columns
-        else 0.0
+        else 0
     )
     res["INFINIA DIESEL"] = (
-        limpiar_serie_numerica(df[col_inf_diesel])
+        limpiar_serie_numerica(df[col_inf_diesel]).round().astype(int)
         if col_inf_diesel and col_inf_diesel in df.columns
-        else 0.0
+        else 0
     )
     res["TOTAL"] = (
         res["NAFTA SUPER"]
@@ -314,7 +315,7 @@ def procesar_archivo_full_html(archivo):
                         rubros_data.append({
                             "Codigo": cod,
                             "Rubro": desc.strip(),
-                            "Cantidad": limpiar_numerico(cant),
+                            "Cantidad": int(round(limpiar_numerico(cant))),
                         })
 
         fecha_str = archivo.name.replace(".htm", "").replace(".html", "")
@@ -355,7 +356,7 @@ def cargar_desd_nube(sheet_name):
                         "total",
                     ]
                 ):
-                    df[col] = limpiar_serie_numerica(df[col])
+                    df[col] = limpiar_serie_numerica(df).round().astype(int)
             return df
     except Exception:
         pass
@@ -426,7 +427,13 @@ if menu_principal == "📊 Ventas (2025 vs 2026)":
                     sheet_name_target = sheet_26
 
                 try:
-                    df_detalle_nube = df_detalle_procesado.fillna("").astype(str)
+                    df_detalle_nube = df_detalle_procesado.copy()
+                    if "Volumen" in df_detalle_nube.columns:
+                        df_detalle_nube["Volumen"] = (
+                            df_detalle_nube["Volumen"].round().astype(int)
+                        )
+                    df_detalle_nube = df_detalle_nube.fillna("").astype(str)
+
                     payload = {
                         "month": sheet_name_target,
                         "headers": df_detalle_nube.columns.tolist(),
@@ -601,7 +608,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
         mes_seleccionado_turno not in st.session_state.turnos_2025
         or st.session_state.turnos_2025[mes_seleccionado_turno].empty
     ):
-        df_nube_t25 = cargar_desde_nube(sheet_t_25)
+        df_nube_t25 = cargar_desd_nube(sheet_t_25)
         if not df_nube_t25.empty:
             st.session_state.turnos_2025[mes_seleccionado_turno] = df_nube_t25
 
@@ -609,7 +616,7 @@ elif menu_principal == "🌙 Ventas por Turnos":
         mes_seleccionado_turno not in st.session_state.turnos_2026
         or st.session_state.turnos_2026[mes_seleccionado_turno].empty
     ):
-        df_nube_t26 = cargar_desde_nube(sheet_t_26)
+        df_nube_t26 = cargar_desd_nube(sheet_t_26)
         if not df_nube_t26.empty:
             st.session_state.turnos_2026[mes_seleccionado_turno] = df_nube_t26
 
@@ -639,7 +646,20 @@ elif menu_principal == "🌙 Ventas por Turnos":
                         )
                         sheet_target = sheet_t_26
                     try:
-                        df_para_nube = df_t_res.fillna("").astype(str)
+                        df_para_nube = df_t_res.copy()
+                        for col in [
+                            "NAFTA SUPER",
+                            "DIESEL 500",
+                            "INFINIA NAFTA",
+                            "INFINIA DIESEL",
+                            "TOTAL",
+                        ]:
+                            if col in df_para_nube.columns:
+                                df_para_nube[col] = (
+                                    df_para_nube[col].round().astype(int)
+                                )
+                        df_para_nube = df_para_nube.fillna("").astype(str)
+
                         payload = {
                             "month": sheet_target,
                             "headers": df_para_nube.columns.tolist(),
@@ -677,11 +697,14 @@ elif menu_principal == "🌙 Ventas por Turnos":
         else procesar_df_turnos_2026(df_t26_raw)
     )
 
-    # ASEGURAR FORZOSAMENTE QUE TOTAL SEA NUMÉRICO PARA EVITAR CONCATENACIONES
     if not df_t_25.empty and "TOTAL" in df_t_25.columns:
-        df_t_25["TOTAL"] = limpiar_serie_numerica(df_t_25["TOTAL"])
+        df_t_25["TOTAL"] = (
+            limpiar_serie_numerica(df_t_25["TOTAL"]).round().astype(int)
+        )
     if not df_t_26.empty and "TOTAL" in df_t_26.columns:
-        df_t_26["TOTAL"] = limpiar_serie_numerica(df_t_26["TOTAL"])
+        df_t_26["TOTAL"] = (
+            limpiar_serie_numerica(df_t_26["TOTAL"]).round().astype(int)
+        )
 
     st.subheader(
         f"🌙 Comparativa de Ventas por Turnos - {mes_seleccionado_turno} (2025"
