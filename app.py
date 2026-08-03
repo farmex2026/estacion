@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 
 # Configuración inicial de la página
-st.set_page_config(page_title="Gestión Estación YPF", layout="wide")
+st.set_page_config(page_title="Gestión Estación YPF (Modo Lectura Nube)", layout="wide")
 
 # Inicialización de session_state para 2025 y 2026
 for anio in [2025, 2026]:
@@ -22,9 +22,9 @@ meses_lista = [
 # URL de Google Apps Script conectada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
-# Función robusta con caché corto para actualización instantánea
+# Función robusta con caché corto para actualización instantánea desde la nube
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
-def cargar_desd_nube(sheet_name):
+def cargar_desde_nube(sheet_name):
     try:
         if URL_NUBE:
             res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=15)
@@ -40,7 +40,7 @@ def cargar_desd_nube(sheet_name):
                 elif isinstance(data, list) and len(data) > 0:
                     return pd.DataFrame(data)
     except Exception as e:
-        st.warning(f"No se pudo cargar desde la nube: {e}")
+        st.warning(f"No se pudo conectar con la nube: {e}")
     return pd.DataFrame()
 
 # Formateador de números estilo argentino (ej: 2.154 o 1.254.300)
@@ -70,7 +70,7 @@ anio_activo = st.sidebar.selectbox("Año", [2026, 2025], index=0)
 # ==========================================
 if menu_principal == "📊 DASHBOARD":
     st.title(f"📊 Dashboard General ({anio_activo})")
-    st.info(f"Panel de control centralizado de la estación para el periodo {anio_activo}.")
+    st.info(f"Panel de control centralizado de la estación para el periodo {anio_activo} (Sincronizado con la nube).")
 
 # ==========================================
 # 2. COMBUSTIBLES
@@ -84,57 +84,22 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
     sheet_comb = f"combustibles_{mes_seleccionado_comb.lower()}_{anio_activo}"
 
+    # Carga automática desde la nube si no está en memoria
     if (
         mes_seleccionado_comb not in st.session_state[f"combustibles_{anio_activo}"]
         or st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb].empty
     ):
-        df_nube_comb = cargar_desd_nube(sheet_comb)
+        df_nube_comb = cargar_desde_nube(sheet_comb)
         if not df_nube_comb.empty:
             st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_nube_comb
 
-    if st.sidebar.button(f"🔄 Recargar Combustibles {anio_activo} desde la Nube"):
+    if st.sidebar.button(f"🔄 Actualizar Datos desde la Nube"):
         st.cache_data.clear()
         st.session_state[f"combustibles_{anio_activo}"].pop(mes_seleccionado_comb, None)
-        df_nube_comb = cargar_desd_nube(sheet_comb)
+        df_nube_comb = cargar_desde_nube(sheet_comb)
         if not df_nube_comb.empty:
             st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_nube_comb
         st.rerun()
-
-    with st.sidebar.expander(f"🔐 Panel Admin (Subir Combustibles {anio_activo})"):
-        archivos_comb = st.file_uploader(
-            f"Subir Planillas Combustibles ({anio_activo})",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_comb_{anio_activo}_{mes_seleccionado_comb}",
-        )
-
-        if archivos_comb:
-            lista_dfs_comb = []
-            for arq in archivos_comb:
-                try:
-                    df_c = pd.read_excel(arq, header=0)
-                    df_c.columns = [str(c).strip() for c in df_c.columns]
-                    lista_dfs_comb.append(df_c)
-                except Exception as e:
-                    st.warning(f"No se pudo leer el archivo {arq.name}: {e}")
-
-            if lista_dfs_comb:
-                df_comb_concatenado = pd.concat(lista_dfs_comb, ignore_index=True).drop_duplicates().reset_index(drop=True)
-                st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_comb_concatenado
-
-                try:
-                    df_para_nube = df_comb_concatenado.copy().fillna("").astype(str)
-                    payload = {
-                        "month": sheet_comb,
-                        "headers": df_para_nube.columns.tolist(),
-                        "rows": df_para_nube.values.tolist(),
-                    }
-                    if URL_NUBE:
-                        requests.post(URL_NUBE, json=payload, timeout=30)
-                    st.cache_data.clear()
-                    st.success(f"¡Combustibles de {anio_activo} guardados en la nube!")
-                except Exception as e:
-                    st.error(f"Error al guardar en la nube: {e}")
 
     df_c = st.session_state[f"combustibles_{anio_activo}"].get(mes_seleccionado_comb, pd.DataFrame())
 
@@ -144,7 +109,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         # Asegurar limpieza de nombres de columnas
         df_c.columns = [str(c).strip() for c in df_c.columns]
         
-        # Mapeo exacto de columnas según tus requerimientos
+        # Mapeo exacto de columnas según tu estructura requerida
         c_fecha = "Fecha y Hora" if "Fecha y Hora" in df_c.columns else df_c.columns[0]
         c_surtidor = "Surtidor/Manguera" if "Surtidor/Manguera" in df_c.columns else df_c.columns[1]
         c_prod = "Producto" if "Producto" in df_c.columns else df_c.columns[2]
@@ -255,7 +220,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         df_mostrar = df_c.drop(columns=[c for c in ['prod_lower', '_temp_dia'] if c in df_c.columns], errors='ignore')
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Combustibles cargados para **{mes_seleccionado_comb} {anio_activo}**.")
+        st.info(f"No hay registros de Combustibles en la nube para **{mes_seleccionado_comb} {anio_activo}**.")
 
 # ==========================================
 # 3. TIENDA FULL
@@ -271,53 +236,17 @@ elif menu_principal == "🛒 TIENDA FULL":
         mes_seleccionado_full not in st.session_state[f"full_{anio_activo}"]
         or st.session_state[f"full_{anio_activo}"][mes_seleccionado_full].empty
     ):
-        df_nube_full = cargar_desd_nube(sheet_full)
+        df_nube_full = cargar_desde_nube(sheet_full)
         if not df_nube_full.empty:
             st.session_state[f"full_{anio_activo}"][mes_seleccionado_full] = df_nube_full
 
-    if st.sidebar.button(f"🔄 Recargar Full {anio_activo} desde la Nube"):
+    if st.sidebar.button(f"🔄 Actualizar Full desde la Nube"):
         st.cache_data.clear()
         st.session_state[f"full_{anio_activo}"].pop(mes_seleccionado_full, None)
-        df_nube_full = cargar_desd_nube(sheet_full)
+        df_nube_full = cargar_desde_nube(sheet_full)
         if not df_nube_full.empty:
             st.session_state[f"full_{anio_activo}"][mes_seleccionado_full] = df_nube_full
         st.rerun()
-
-    with st.sidebar.expander(f"🔐 Panel Admin (Subir Full {anio_activo})"):
-        archivos_full = st.file_uploader(
-            f"Subir Planillas Full ({anio_activo})",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_full_{anio_activo}_{mes_seleccionado_full}",
-        )
-
-        if archivos_full:
-            lista_dfs_full = []
-            for arq in archivos_full:
-                try:
-                    df_f = pd.read_excel(arq, header=0)
-                    df_f.columns = [str(c).strip() for c in df_f.columns]
-                    lista_dfs_full.append(df_f)
-                except Exception as e:
-                    st.warning(f"No se pudo leer el archivo {arq.name}: {e}")
-
-            if lista_dfs_full:
-                df_full_concatenado = pd.concat(lista_dfs_full, ignore_index=True).drop_duplicates().reset_index(drop=True)
-                st.session_state[f"full_{anio_activo}"][mes_seleccionado_full] = df_full_concatenado
-
-                try:
-                    df_para_nube = df_full_concatenado.copy().fillna("").astype(str)
-                    payload = {
-                        "month": sheet_full,
-                        "headers": df_para_nube.columns.tolist(),
-                        "rows": df_para_nube.values.tolist(),
-                    }
-                    if URL_NUBE:
-                        requests.post(URL_NUBE, json=payload, timeout=30)
-                    st.cache_data.clear()
-                    st.success(f"¡Full de {anio_activo} guardado en la nube!")
-                except Exception as e:
-                    st.error(f"Error al guardar en la nube: {e}")
 
     st.title(f"🛒 Tienda Full - {mes_seleccionado_full} ({anio_activo})")
     df_rubros = st.session_state[f"full_{anio_activo}"].get(mes_seleccionado_full, pd.DataFrame())
@@ -349,7 +278,7 @@ elif menu_principal == "🛒 TIENDA FULL":
         else:
             st.dataframe(df_rubros, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Tienda Full para **{mes_seleccionado_full} {anio_activo}**.")
+        st.info(f"No hay registros de Tienda Full en la nube para **{mes_seleccionado_full} {anio_activo}**.")
 
 # ==========================================
 # 4. BOXES
@@ -367,53 +296,17 @@ elif menu_principal == "📦 BOXES":
         mes_seleccionado_boxes not in st.session_state[f"boxes_{anio_activo}"]
         or st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes].empty
     ):
-        df_nube_boxes = cargar_desd_nube(sheet_boxes)
+        df_nube_boxes = cargar_desde_nube(sheet_boxes)
         if not df_nube_boxes.empty:
             st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes] = df_nube_boxes
 
-    if st.sidebar.button(f"🔄 Recargar Boxes {anio_activo} desde la Nube"):
+    if st.sidebar.button(f"🔄 Actualizar Boxes desde la Nube"):
         st.cache_data.clear()
         st.session_state[f"boxes_{anio_activo}"].pop(mes_seleccionado_boxes, None)
-        df_nube_boxes = cargar_desd_nube(sheet_boxes)
+        df_nube_boxes = cargar_desde_nube(sheet_boxes)
         if not df_nube_boxes.empty:
             st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes] = df_nube_boxes
         st.rerun()
-
-    with st.sidebar.expander(f"🔐 Panel Admin (Subir Boxes {anio_activo})"):
-        archivos_boxes = st.file_uploader(
-            f"Subir Planillas Boxes ({anio_activo})",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_boxes_{anio_activo}_{mes_seleccionado_boxes}",
-        )
-
-        if archivos_boxes:
-            lista_dfs_boxes = []
-            for arq in archivos_boxes:
-                try:
-                    df_b = pd.read_excel(arq, header=0)
-                    df_b.columns = [str(c).strip() for c in df_b.columns]
-                    lista_dfs_boxes.append(df_b)
-                except Exception as e:
-                    st.warning(f"No se pudo leer el archivo {arq.name}: {e}")
-
-            if lista_dfs_boxes:
-                df_boxes_concatenado = pd.concat(lista_dfs_boxes, ignore_index=True).drop_duplicates().reset_index(drop=True)
-                st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes] = df_boxes_concatenado
-
-                try:
-                    df_para_nube = df_boxes_concatenado.copy().fillna("").astype(str)
-                    payload = {
-                        "month": sheet_boxes,
-                        "headers": df_para_nube.columns.tolist(),
-                        "rows": df_para_nube.values.tolist(),
-                    }
-                    if URL_NUBE:
-                        requests.post(URL_NUBE, json=payload, timeout=30)
-                    st.cache_data.clear()
-                    st.success(f"¡Boxes de {anio_activo} guardados en la nube!")
-                except Exception as e:
-                    st.error(f"Error al guardar en la nube: {e}")
 
     df_b = st.session_state[f"boxes_{anio_activo}"].get(mes_seleccionado_boxes, pd.DataFrame())
 
@@ -424,7 +317,7 @@ elif menu_principal == "📦 BOXES":
         st.markdown("---")
         st.dataframe(df_b, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Boxes para **{mes_seleccionado_boxes} {anio_activo}**.")
+        st.info(f"No hay registros de Boxes en la nube para **{mes_seleccionado_boxes} {anio_activo}**.")
 
 # ==========================================
 # 5. TABLERO YPF
