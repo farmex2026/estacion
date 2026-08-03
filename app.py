@@ -354,7 +354,6 @@ def cargar_desd_nube(sheet_name):
                         "total",
                     ]
                 ):
-                    # CORREGIDO: Se pasa df[col] en lugar de df completo
                     df[col] = limpiar_serie_numerica(df[col]).round().astype(int)
             return df
     except Exception:
@@ -885,7 +884,7 @@ elif menu_principal == "🛒 Tienda Full":
         if todos_rubros_26:
             df_rubros_26 = pd.DataFrame(todos_rubros_26)
             df_rubros_sum = (
-                df_rubros_26.groupby("Rubro")
+                df_rubros_26.groupby(["Codigo", "Rubro"])
                 .agg({"Cantidad": "sum"})
                 .reset_index()
             )
@@ -907,9 +906,7 @@ elif menu_principal == "🛒 Tienda Full":
             )
 
             mask_bebidas_cal = (
-                df_rubros_sum["Rubro"]
-                .str.upper()
-                .str.contains("BEBIDAS CALIENTES", na=False)
+                df_rubros_sum["Codigo"].astype(str).str.strip() == "02-232"
             )
             df_bebidas_cal_detalle = df_rubros_sum[mask_bebidas_cal]
             total_cant_bebidas_cal = (
@@ -934,7 +931,7 @@ elif menu_principal == "🛒 Tienda Full":
                     )
             with col_c2:
                 st.metric(
-                    label="☕ Total Unidades Bebidas Calientes",
+                    label="☕ Total Unidades Bebidas Calientes (Rubro 02-232)",
                     value=fmt_entero(total_cant_bebidas_cal),
                 )
                 if not df_bebidas_cal_detalle.empty:
@@ -946,7 +943,7 @@ elif menu_principal == "🛒 Tienda Full":
                         hide_index=True,
                     )
                 else:
-                    st.info("Sin registros de Bebidas Calientes.")
+                    st.info("Sin registros con el código 02-232.")
 
             st.markdown("---")
             st.subheader("📋 Detalle Completo de Unidades por Rubro (2026)")
@@ -963,10 +960,49 @@ elif menu_principal == "🛒 Tienda Full":
 
         st.markdown("---")
         st.subheader("📋 Listado de Cierres Diarios")
-        df_mostrar_26 = df_f26[["archivo", "cierre"]].copy()
-        df_mostrar_26.columns = ["Archivo", "Cierre Nro"]
+
+        lista_cierres_det = []
+        for _, row in df_f26.iterrows():
+            fecha = row.get("fecha", "")
+            cierre_raw = row.get("cierre", "")
+            match_cierre = re.search(r"(\d+)", str(cierre_raw))
+            cierre_nro = (
+                match_cierre.group(1) if match_cierre else str(cierre_raw)
+            )
+
+            rubros = row.get("rubros", [])
+            cant_elaborada = 0
+            cant_envasada = 0
+            cant_calientes = 0
+
+            if isinstance(rubros, list):
+                for r in rubros:
+                    cod = str(r.get("Codigo", "")).strip()
+                    cant = r.get("Cantidad", 0)
+                    if cod == "02-241":
+                        cant_elaborada += cant
+                    elif cod == "02-198":
+                        cant_envasada += cant
+                    elif cod == "02-232":
+                        cant_calientes += cant
+
+            lista_cierres_det.append({
+                "Fecha": fecha,
+                "Cierre Nro": cierre_nro,
+                "Comida Elaborada (02-241)": cant_elaborada,
+                "Comida Envasada (02-198)": cant_envasada,
+                "Bebidas Calientes (02-232)": cant_calientes,
+            })
+
+        df_mostrar_26 = pd.DataFrame(lista_cierres_det)
         st.dataframe(
-            df_mostrar_26, use_container_width=True, hide_index=True
+            df_mostrar_26.style.format({
+                "Comida Elaborada (02-241)": fmt_entero,
+                "Comida Envasada (02-198)": fmt_entero,
+                "Bebidas Calientes (02-232)": fmt_entero,
+            }),
+            use_container_width=True,
+            hide_index=True,
         )
     else:
         st.info(
