@@ -18,18 +18,19 @@ meses_lista = [
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ]
 
-URL_NUBE = ""  # URL de tu API o Google Apps Script si la usas
+# Tu URL de Google Apps Script conectada
+URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
 def cargar_desd_nube(sheet_name):
     try:
         if URL_NUBE:
-            res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=10)
+            res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=15)
             if res.status_code == 200:
                 data = res.json()
-                if "rows" in data and "headers" in data:
+                if "rows" in data and "headers" in data and data["rows"]:
                     return pd.DataFrame(data["rows"], columns=data["headers"])
-    except Exception:
-        pass
+    except Exception as e:
+        st.warning(f"No se pudo cargar desde la nube: {e}")
     return pd.DataFrame()
 
 # Menú principal en la barra lateral
@@ -103,7 +104,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     }
                     if URL_NUBE:
                         requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success("¡Archivos de Combustibles procesados correctamente!")
+                    st.success("¡Archivos de Combustibles guardados en la nube!")
                 except Exception as e:
                     st.error(f"Error al guardar Combustibles en la nube: {e}")
 
@@ -174,7 +175,7 @@ elif menu_principal == "🛒 TIENDA FULL":
                     }
                     if URL_NUBE:
                         requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success("¡Archivos de Full procesados correctamente!")
+                    st.success("¡Archivos de Full guardados en la nube!")
                 except Exception as e:
                     st.error(f"Error al guardar Full en la nube: {e}")
 
@@ -182,7 +183,6 @@ elif menu_principal == "🛒 TIENDA FULL":
     df_rubros_26 = st.session_state.full_2026.get(mes_seleccionado_full, pd.DataFrame())
 
     if not df_rubros_26.empty:
-        # Búsqueda flexible de columnas para evitar fallos si el Excel tiene nombres distintos
         cols_lower = {str(c).lower().strip(): c for c in df_rubros_26.columns}
         col_codigo = next((cols_lower[c] for c in cols_lower if c in ["codigo", "código", "cod"]), None)
         col_rubro = next((cols_lower[c] for c in cols_lower if c in ["rubro", "descripcion", "descripción", "categoria", "categoría"]), None)
@@ -210,7 +210,7 @@ elif menu_principal == "🛒 TIENDA FULL":
                 hide_index=True,
             )
         else:
-            st.warning("⚠️ No se detectaron exactamente las columnas de Código, Rubro/Descripción y Cantidad. Mostrando datos completos del archivo:")
+            st.warning("⚠️ No se detectaron exactamente las columnas de Código, Rubro y Cantidad. Mostrando datos completos:")
             st.dataframe(df_rubros_26, use_container_width=True, hide_index=True)
     else:
         st.info(f"No hay cierres de Tienda Full cargados para el mes de **{mes_seleccionado_full}**. Subí tus planillas desde el panel lateral izquierdo.")
@@ -273,7 +273,7 @@ elif menu_principal == "📦 BOXES":
                     }
                     if URL_NUBE:
                         requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success("¡Archivos de Boxes procesados correctamente!")
+                    st.success("¡Archivos de Boxes guardados en la nube!")
                 except Exception as e:
                     st.error(f"Error al guardar Boxes en la nube: {e}")
 
