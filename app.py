@@ -947,11 +947,13 @@ elif menu_principal == "🛒 Tienda Full":
 
             st.markdown("---")
             st.subheader("📋 Detalle Completo de Unidades por Rubro (2026)")
-            st.dataframe(
-                df_rubros_sum.style.format({"Cantidad": fmt_entero}),
-                use_container_width=True,
-                hide_index=True,
-            )
+            col_det1, _ = st.columns([1, 1])
+            with col_det1:
+                st.dataframe(
+                    df_rubros_sum.style.format({"Cantidad": fmt_entero}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
         else:
             st.info(
                 "No hay datos de rubros detallados en los archivos HTML"
@@ -995,15 +997,18 @@ elif menu_principal == "🛒 Tienda Full":
             })
 
         df_mostrar_26 = pd.DataFrame(lista_cierres_det)
-        st.dataframe(
-            df_mostrar_26.style.format({
-                "Comida Elaborada (02-241)": fmt_entero,
-                "Comida Envasada (02-198)": fmt_entero,
-                "Bebidas Calientes (02-232)": fmt_entero,
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
+        
+        col_cierres1, _ = st.columns([1, 1])
+        with col_cierres1:
+            st.dataframe(
+                df_mostrar_26.style.format({
+                    "Comida Elaborada (02-241)": fmt_entero,
+                    "Comida Envasada (02-198)": fmt_entero,
+                    "Bebidas Calientes (02-232)": fmt_entero,
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
     else:
         st.info(
             f"No hay registros de Tienda Full cargados para el mes de"
