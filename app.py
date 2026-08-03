@@ -295,16 +295,11 @@ def procesar_archivo_full_html(archivo):
             if "CIERRE DE CAJA NRO:" in linea:
                 cierre_nro = linea
 
-            if "FACTURAS (B)" in linea.upper():
-                match_ult = re.search(r"ULT:\s*(\d+)", linea, re.IGNORECASE)
-                if match_ult:
-                    ultimo_ticket = match_ult.group(1)
-            elif (
-                "FACTURAS" in linea.upper()
-                and "ULT:" in linea.upper()
-                and not ultimo_ticket
-            ):
-                match_ult = re.search(r"ULT:\s*(\d+)", linea, re.IGNORECASE)
+            # Captura robusta del último ticket (ej: FACTURAS (B) : PRIM: 6296 ULT: 6417)
+            if "FACTURAS" in linea.upper() and "ULT" in linea.upper():
+                match_ult = re.search(
+                    r"ULT\.?\s*[:\-]?\s*(\d+)", linea, re.IGNORECASE
+                )
                 if match_ult:
                     ultimo_ticket = match_ult.group(1)
 
