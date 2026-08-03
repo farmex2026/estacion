@@ -111,7 +111,6 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         
         # Mapeo exacto de columnas según tu estructura requerida
         c_fecha = "Fecha y Hora" if "Fecha y Hora" in df_c.columns else df_c.columns[0]
-        c_surtidor = "Surtidor/Manguera" if "Surtidor/Manguera" in df_c.columns else df_c.columns[1]
         c_prod = "Producto" if "Producto" in df_c.columns else df_c.columns[2]
         c_vol = "Volumen" if "Volumen" in df_c.columns else df_c.columns[3]
         c_venta = "Venta Total" if "Venta Total" in df_c.columns else df_c.columns[4]
@@ -123,51 +122,12 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         total_ventas = df_c[c_venta].sum()
         total_despachos = len(df_c)
 
-        # Extracción automática de la fecha/día
-        df_c['_temp_dia'] = pd.to_datetime(df_c[c_fecha], errors='coerce').dt.date
-        if df_c['_temp_dia'].notna().sum() == 0:
-            df_c['_temp_dia'] = df_c[c_fecha].astype(str).str.split().str[0]
-        c_dia = '_temp_dia'
-
         # Métricas principales arriba
         col1, col2 = st.columns(2)
         with col1:
             st.metric("📦 Cantidad de Despachos", formato_arg(total_despachos))
         with col2:
             st.metric("⛽ Ventas Totales", formato_arg(total_ventas, 2 if total_ventas % 1 != 0 else 0))
-
-        st.markdown("---")
-
-        # Bloque de Surtidores y Días alineados en 2 columnas
-        col_surt, col_dias = st.columns(2)
-
-        with col_surt:
-            st.markdown("### 🔌 Ventas por Surtidor")
-            if c_surtidor in df_c.columns and c_venta in df_c.columns:
-                df_surt_sum = df_c.groupby(c_surtidor)[c_venta].sum().reset_index()
-                df_surt_sum.columns = ["Surtidor / Manguera", "Venta Total"]
-                df_surt_sum = df_surt_sum.sort_values(by="Venta Total", ascending=False).reset_index(drop=True)
-                st.dataframe(
-                    df_surt_sum.style.format({"Venta Total": lambda x: formato_arg(x, 2)}),
-                    use_container_width=True,
-                    hide_index=True
-                )
-            else:
-                st.info("No se encontró la columna de surtidor o venta total.")
-
-        with col_dias:
-            st.markdown("### 📅 Ventas por Día")
-            if c_dia in df_c.columns and c_venta in df_c.columns:
-                df_dia_sum = df_c.groupby(c_dia)[c_venta].sum().reset_index()
-                df_dia_sum.columns = ["Día / Fecha", "Venta Total"]
-                df_dia_sum = df_dia_sum.sort_values(by="Día / Fecha").reset_index(drop=True)
-                st.dataframe(
-                    df_dia_sum.style.format({"Venta Total": lambda x: formato_arg(x, 2)}),
-                    use_container_width=True,
-                    hide_index=True
-                )
-            else:
-                st.info("No se pudo extraer la fecha para el desglose diario.")
 
         st.markdown("---")
 
@@ -217,7 +177,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
         st.markdown("---")
         st.markdown("### 📋 Detalle General de Cargas")
-        df_mostrar = df_c.drop(columns=[c for c in ['prod_lower', '_temp_dia'] if c in df_c.columns], errors='ignore')
+        df_mostrar = df_c.drop(columns=[c for c in ['prod_lower'] if c in df_c.columns], errors='ignore')
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
         st.info(f"No hay registros de Combustibles en la nube para **{mes_seleccionado_comb} {anio_activo}**.")
