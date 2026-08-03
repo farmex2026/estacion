@@ -1,3 +1,9 @@
+else:
+            st.info("No hay datos de rubros en los archivos cargados de Tienda Full.")
+    else:
+        st.info(f"No hay cierres de Tienda Full cargados para el mes de **{mes_seleccionado_full}**.")
+
+
 # ==========================================
 # MENÚ 4: BOXES
 # ==========================================
