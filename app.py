@@ -91,8 +91,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             lista_dfs_comb = []
             for arq in archivos_comb:
                 try:
-                    # Se configuro header=6 para que lea a partir de la fila 7 (A7)
-                    df_c = pd.read_excel(arq, header=6)
+                    # Lee directamente desde la fila 1 (encabezado en row 0)
+                    df_c = pd.read_excel(arq, header=0)
                     df_c.columns = [str(c).strip() for c in df_c.columns]
                     lista_dfs_comb.append(df_c)
                 except Exception as e:
@@ -163,7 +163,7 @@ elif menu_principal == "🛒 TIENDA FULL":
             lista_dfs_full = []
             for arq in archivos_full:
                 try:
-                    df_f = pd.read_excel(arq)
+                    df_f = pd.read_excel(arq, header=0)
                     df_f.columns = [str(c).strip() for c in df_f.columns]
                     lista_dfs_full.append(df_f)
                 except Exception as e:
@@ -261,7 +261,7 @@ elif menu_principal == "📦 BOXES":
             lista_dfs_boxes = []
             for arq in archivos_boxes:
                 try:
-                    df_b = pd.read_excel(arq)
+                    df_b = pd.read_excel(arq, header=0)
                     df_b.columns = [str(c).strip() for c in df_b.columns]
                     lista_dfs_boxes.append(df_b)
                 except Exception as e:
