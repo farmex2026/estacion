@@ -82,6 +82,22 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         "Mes Combustibles", meses_lista, key=f"mes_comb_{anio_activo}"
     )
 
+    # Opción de carga manual/local de archivo en la barra lateral
+    st.sidebar.markdown("---")
+    st.sidebar.header("📥 Carga Manual de Archivo")
+    archivo_subido = st.sidebar.file_uploader(f"Subir Excel/CSV para {mes_seleccionado_comb} ({anio_activo})", type=["csv", "xlsx", "xls"], key=f"uploader_comb_{anio_activo}_{mes_seleccionado_comb}")
+    if archivo_subido is not None:
+        try:
+            if archivo_subido.name.endswith('.csv'):
+                df_subido = pd.read_csv(archivo_subido)
+            else:
+                df_subido = pd.read_excel(archivo_subido)
+            if not df_subido.empty:
+                st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_subido
+                st.sidebar.success("¡Archivo cargado con éxito!")
+        except Exception as e:
+            st.sidebar.error(f"Error al leer el archivo: {e}")
+
     sheet_comb = f"combustibles_{mes_seleccionado_comb.lower()}_{anio_activo}"
 
     # Carga automática desde la nube si no está en memoria
