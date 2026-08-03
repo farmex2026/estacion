@@ -141,32 +141,28 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     st.subheader(f"⛽ Gestión y Ventas de COMBUSTIBLES - {mes_seleccionado_comb} ({anio_activo})")
 
     if not df_c.empty:
-        # Mapeo exacto basado en tus encabezados:
-        # Col 1 (index 0): Fecha y Hora
-        # Col 2 (index 1): Surtidor/Manguera
-        # Col 3 (index 2): Producto
-        # Col 4 (index 3): Volumen
-        # Col 5 (index 4): Venta Total
+        # Asegurar limpieza de nombres de columnas
+        df_c.columns = [str(c).strip() for c in df_c.columns]
         
-        c_fecha = next((c for c in df_c.columns if 'fecha' in str(c).lower() and 'hora' in str(c).lower()), df_c.columns[0] if len(df_c.columns) > 0 else None)
-        c_surtidor = next((c for c in df_c.columns if 'surtidor' in str(c).lower() or 'manguera' in str(c).lower()), df_c.columns[1] if len(df_c.columns) > 1 else None)
-        c_prod = next((c for c in df_c.columns if 'producto' in str(c).lower()), df_c.columns[2] if len(df_c.columns) > 2 else None)
+        # Mapeo exacto de columnas según tus requerimientos
+        c_fecha = "Fecha y Hora" if "Fecha y Hora" in df_c.columns else df_c.columns[0]
+        c_surtidor = "Surtidor/Manguera" if "Surtidor/Manguera" in df_c.columns else df_c.columns[1]
+        c_prod = "Producto" if "Producto" in df_c.columns else df_c.columns[2]
+        c_vol = "Volumen" if "Volumen" in df_c.columns else df_c.columns[3]
+        c_venta = "Venta Total" if "Venta Total" in df_c.columns else df_c.columns[4]
         
-        # Columna 5 (índice 4): Venta Total
-        c_vol = next((c for c in df_c.columns if 'venta total' in str(c).lower()), df_c.columns[4] if len(df_c.columns) >= 5 else df_c.columns[-1])
-        
+        # Convertir a numéricos de forma segura
+        df_c[c_venta] = pd.to_numeric(df_c[c_venta], errors='coerce').fillna(0)
         df_c[c_vol] = pd.to_numeric(df_c[c_vol], errors='coerce').fillna(0)
-        total_ventas = df_c[c_vol].sum()
+        
+        total_ventas = df_c[c_venta].sum()
         total_despachos = len(df_c)
 
-        # Extracción automática del día/fecha desde 'Fecha y Hora' para la tabla de Ventas por Día
-        if c_fecha:
-            df_c['_temp_dia'] = pd.to_datetime(df_c[c_fecha], errors='coerce').dt.date
-            if df_c['_temp_dia'].notna().sum() == 0:
-                df_c['_temp_dia'] = df_c[c_fecha].astype(str).str.split().str[0]
-            c_dia = '_temp_dia'
-        else:
-            c_dia = None
+        # Extracción automática de la fecha/día
+        df_c['_temp_dia'] = pd.to_datetime(df_c[c_fecha], errors='coerce').dt.date
+        if df_c['_temp_dia'].notna().sum() == 0:
+            df_c['_temp_dia'] = df_c[c_fecha].astype(str).str.split().str[0]
+        c_dia = '_temp_dia'
 
         # Métricas principales arriba
         col1, col2 = st.columns(2)
@@ -182,26 +178,26 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
         with col_surt:
             st.markdown("### 🔌 Ventas por Surtidor")
-            if c_surtidor:
-                df_surt_sum = df_c.groupby(c_surtidor)[c_vol].sum().reset_index()
-                df_surt_sum.columns = ["Surtidor / Manguera", "Total"]
-                df_surt_sum = df_surt_sum.sort_values(by="Total", ascending=False).reset_index(drop=True)
+            if c_surtidor in df_c.columns and c_venta in df_c.columns:
+                df_surt_sum = df_c.groupby(c_surtidor)[c_venta].sum().reset_index()
+                df_surt_sum.columns = ["Surtidor / Manguera", "Venta Total"]
+                df_surt_sum = df_surt_sum.sort_values(by="Venta Total", ascending=False).reset_index(drop=True)
                 st.dataframe(
-                    df_surt_sum.style.format({"Total": lambda x: formato_arg(x, 2)}),
+                    df_surt_sum.style.format({"Venta Total": lambda x: formato_arg(x, 2)}),
                     use_container_width=True,
                     hide_index=True
                 )
             else:
-                st.info("No se encontró la columna de surtidor.")
+                st.info("No se encontró la columna de surtidor o venta total.")
 
         with col_dias:
             st.markdown("### 📅 Ventas por Día")
-            if c_dia:
-                df_dia_sum = df_c.groupby(c_dia)[c_vol].sum().reset_index()
-                df_dia_sum.columns = ["Día / Fecha", "Total"]
+            if c_dia in df_c.columns and c_venta in df_c.columns:
+                df_dia_sum = df_c.groupby(c_dia)[c_venta].sum().reset_index()
+                df_dia_sum.columns = ["Día / Fecha", "Venta Total"]
                 df_dia_sum = df_dia_sum.sort_values(by="Día / Fecha").reset_index(drop=True)
                 st.dataframe(
-                    df_dia_sum.style.format({"Total": lambda x: formato_arg(x, 2)}),
+                    df_dia_sum.style.format({"Venta Total": lambda x: formato_arg(x, 2)}),
                     use_container_width=True,
                     hide_index=True
                 )
@@ -210,9 +206,9 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
         st.markdown("---")
 
-        # Mix de Ventas por Producto (Naftas y Diésel)
+        # Mix de Ventas por Producto (Naftas y Diésel) usando Volumen
         st.markdown("### 📊 Mix de Ventas por Producto")
-        if c_prod:
+        if c_prod in df_c.columns:
             df_c['prod_lower'] = df_c[c_prod].astype(str).str.lower()
             
             vol_super = df_c[df_c['prod_lower'].str.contains('super|ns xxi', case=False, na=False)][c_vol].sum()
@@ -231,7 +227,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     pct_infinia = (vol_infinia_nafta / total_naftas) * 100
                     df_mix_naftas = pd.DataFrame({
                         "Producto": ["Super / NS XXI", "Infinia"],
-                        "Volumen / Total": [formato_arg(vol_super, 2), formato_arg(vol_infinia_nafta, 2)],
+                        "Volumen (L)": [formato_arg(vol_super, 2), formato_arg(vol_infinia_nafta, 2)],
                         "Mix (%)": [f"{pct_super:.2f}%", f"{pct_infinia:.2f}%"]
                     })
                     st.dataframe(df_mix_naftas, use_container_width=True, hide_index=True)
@@ -245,7 +241,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     pct_inf_diesel = (vol_infinia_diesel / total_diesel) * 100
                     df_mix_diesel = pd.DataFrame({
                         "Producto": ["D. Diesel 500", "GO - Infinia Diesel"],
-                        "Volumen / Total": [formato_arg(vol_d500, 2), formato_arg(vol_infinia_diesel, 2)],
+                        "Volumen (L)": [formato_arg(vol_d500, 2), formato_arg(vol_infinia_diesel, 2)],
                         "Mix (%)": [f"{pct_d500:.2f}%", f"{pct_inf_diesel:.2f}%"]
                     })
                     st.dataframe(df_mix_diesel, use_container_width=True, hide_index=True)
@@ -345,11 +341,8 @@ elif menu_principal == "🛒 TIENDA FULL":
                 by="Cantidad", ascending=False
             ).reset_index(drop=True)
 
-            def fmt_entero(val):
-                return formato_arg(val, 0)
-
             st.dataframe(
-                df_rubros_sum.style.format({"Cantidad": fmt_entero}),
+                df_rubros_sum.style.format({"Cantidad": lambda x: formato_arg(x, 0)}),
                 use_container_width=True,
                 hide_index=True,
             )
