@@ -22,7 +22,7 @@ meses_lista = [
 # Tu URL de Google Apps Script conectada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
-# Función robusta y con caché corto para evitar que quede trabado en vacío al actualizar
+# Función robusta con caché corto para actualización instantánea
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desd_nube(sheet_name):
     try:
@@ -30,7 +30,6 @@ def cargar_desd_nube(sheet_name):
             res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=15)
             if res.status_code == 200:
                 data = res.json()
-                # Compatible con múltiples formatos de respuesta de Google Apps Script
                 if isinstance(data, dict):
                     rows = data.get("rows", data.get("data", []))
                     headers = data.get("headers", data.get("columns", []))
@@ -43,6 +42,17 @@ def cargar_desd_nube(sheet_name):
     except Exception as e:
         st.warning(f"No se pudo cargar desde la nube: {e}")
     return pd.DataFrame()
+
+# Formateador de números estilo argentino (ej: 2.154 o 1.254.300)
+def formato_arg(val, decimales=0):
+    try:
+        if decimales > 0:
+            s = f"{val:,.{decimales}f}"
+        else:
+            s = f"{val:,.0f}"
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
+    except:
+        return str(val)
 
 # Menú principal en la barra lateral
 menu_principal = st.sidebar.selectbox(
@@ -132,50 +142,26 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
     if not df_c.empty:
         cols_map = {str(c).lower().strip(): c for c in df_c.columns}
-        c_fecha = next((cols_map[c] for c in cols_map if "fecha" in c), None)
-        c_surtidor = next((cols_map[c] for c in cols_map if "surtidor" in c or "manguera" in c), None)
         c_prod = next((cols_map[c] for c in cols_map if "producto" in c), None)
         c_vol = next((cols_map[c] for c in cols_map if "volumen" in c), None)
         c_desp = next((cols_map[c] for c in cols_map if "despacho" in c or "cant" in c), None)
-        c_venta = next((cols_map[c] for c in cols_map if "venta" in c or "total" in c), None)
 
         if c_vol: df_c[c_vol] = pd.to_numeric(df_c[c_vol], errors='coerce').fillna(0)
         if c_desp: df_c[c_desp] = pd.to_numeric(df_c[c_desp], errors='coerce').fillna(0)
-        if c_venta: df_c[c_venta] = pd.to_numeric(df_c[c_venta], errors='coerce').fillna(0)
 
         total_despachos = int(df_c[c_desp].sum()) if c_desp else len(df_c)
-        total_venta = df_c[c_venta].sum() if c_venta else 0.0
+        total_volumen = df_c[c_vol].sum() if c_vol else 0.0
 
-        mejor_dia = "N/D"
-        if c_fecha and c_venta:
-            try:
-                df_c['temp_dt'] = pd.to_datetime(df_c[c_fecha], errors='coerce')
-                dias_map = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
-                df_c['temp_dia'] = df_c['temp_dt'].dt.dayofweek.map(dias_map)
-                ventas_por_dia = df_c.groupby('temp_dia')[c_venta].sum()
-                if not ventas_por_dia.empty:
-                    mejor_dia = ventas_por_dia.idxmax()
-            except Exception:
-                pass
-
-        mejor_surtidor = "N/D"
-        if c_surtidor and c_venta:
-            ventas_surtidor = df_c.groupby(c_surtidor)[c_venta].sum()
-            if not ventas_surtidor.empty:
-                mejor_surtidor = str(ventas_surtidor.idxmax())
-
-        col1, col2, col3, col4 = st.columns(4)
+        # Métricas principales arriba de la tabla con formato exacto pedido
+        col1, col2 = st.columns(2)
         with col1:
-            st.metric("📦 Cant. Despachos", f"{total_despachos:,}")
+            st.metric("📦 Cantidad de Despachos", formato_arg(total_despachos))
         with col2:
-            st.metric("💰 Venta Total", f"${total_venta:,.2f}")
-        with col3:
-            st.metric("📅 Día con más Venta", mejor_dia)
-        with col4:
-            st.metric("⛽ Surtidor Más Vendido", mejor_surtidor)
+            st.metric("⛽ Ventas Totales (Litros)", formato_arg(total_volumen, 2 if total_volumen % 1 != 0 else 0))
 
         st.markdown("---")
 
+        # Mix de Ventas (Super / NS XXI vs Infinia y GO/Infinia Diesel vs D.Diesel 500)
         st.markdown("### 📊 Mix de Ventas por Producto")
         if c_prod and c_vol:
             df_c['prod_lower'] = df_c[c_prod].astype(str).str.lower()
@@ -196,7 +182,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     pct_infinia = (vol_infinia_nafta / total_naftas) * 100
                     df_mix_naftas = pd.DataFrame({
                         "Producto": ["Super / NS XXI", "Infinia"],
-                        "Volumen": [vol_super, vol_infinia_nafta],
+                        "Volumen (Litros)": [formato_arg(vol_super, 2), formato_arg(vol_infinia_nafta, 2)],
                         "Mix (%)": [f"{pct_super:.2f}%", f"{pct_infinia:.2f}%"]
                     })
                     st.dataframe(df_mix_naftas, use_container_width=True, hide_index=True)
@@ -204,13 +190,13 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     st.info("Sin registros de Naftas detectados.")
 
             with col_mix2:
-                st.markdown("#### 🛢️ Mix Diésel (GO / Infinia Diesel vs D. Diesel 500)")
+                st.markdown("#### 🛢️ Mix Diésel (GO - INFINIA DIESEL vs D. DIESEL 500)")
                 if total_diesel > 0:
                     pct_d500 = (vol_d500 / total_diesel) * 100
                     pct_inf_diesel = (vol_infinia_diesel / total_diesel) * 100
                     df_mix_diesel = pd.DataFrame({
-                        "Producto": ["D. Diesel 500", "GO / Infinia Diesel"],
-                        "Volumen": [vol_d500, vol_infinia_diesel],
+                        "Producto": ["D. Diesel 500", "GO - Infinia Diesel"],
+                        "Volumen (Litros)": [formato_arg(vol_d500, 2), formato_arg(vol_infinia_diesel, 2)],
                         "Mix (%)": [f"{pct_d500:.2f}%", f"{pct_inf_diesel:.2f}%"]
                     })
                     st.dataframe(df_mix_diesel, use_container_width=True, hide_index=True)
@@ -219,7 +205,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
         st.markdown("---")
         st.markdown("### 📋 Detalle de Cargas")
-        df_mostrar = df_c.drop(columns=[c for c in ['temp_dt', 'temp_dia', 'prod_lower'] if c in df_c.columns], errors='ignore')
+        df_mostrar = df_c.drop(columns=[c for c in ['prod_lower'] if c in df_c.columns], errors='ignore')
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
         st.info(f"No hay registros de Combustibles cargados para **{mes_seleccionado_comb} {anio_activo}**.")
@@ -309,7 +295,7 @@ elif menu_principal == "🛒 TIENDA FULL":
             ).reset_index(drop=True)
 
             def fmt_entero(val):
-                return f"{int(val):,}"
+                return formato_arg(val, 0)
 
             st.dataframe(
                 df_rubros_sum.style.format({"Cantidad": fmt_entero}),
