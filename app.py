@@ -58,21 +58,6 @@ meses_lista = [
 ]
 
 
-def fmt_litros(val):
-    if pd.isna(val):
-        return "0,00 L"
-    partes = f"{val:,.2f}".split(".")
-    enteros = partes[0].replace(",", ".")
-    decimales = partes[1]
-    return f"{enteros},{decimales} L"
-
-
-def fmt_entero(val):
-    if pd.isna(val):
-        return "0"
-    return f"{int(val):,}".replace(",", ".")
-
-
 def limpiar_numerico(val):
     if pd.isna(val):
         return 0.0
@@ -81,10 +66,14 @@ def limpiar_numerico(val):
     s = str(val).strip()
     if not s or s.lower() == "nan":
         return 0.0
+    s = re.sub(r"[^\d.,-]", "", s)
     if "." in s and "," in s:
         s = s.replace(".", "").replace(",", ".")
     elif "," in s:
         s = s.replace(",", ".")
+    elif "." in s:
+        if s.count(".") > 1:
+            s = s.replace(".", "")
     try:
         return float(s)
     except:
@@ -93,6 +82,21 @@ def limpiar_numerico(val):
 
 def limpiar_serie_numerica(serie):
     return serie.apply(limpiar_numerico)
+
+
+# Formato solicitado: Redondeo a entero, sin decimales, con puntos para miles (Ej: 198.000 y 1.000)
+def fmt_litros(val):
+    if pd.isna(val):
+        return "0 L"
+    val_redondeado = int(round(limpiar_numerico(val)))
+    return f"{val_redondeado:,} L".replace(",", ".")
+
+
+def fmt_entero(val):
+    if pd.isna(val):
+        return "0"
+    val_redondeado = int(round(limpiar_numerico(val)))
+    return f"{val_redondeado:,}".replace(",", ".")
 
 
 def procesar_archivos_playa_detalle(archivos):
@@ -673,6 +677,12 @@ elif menu_principal == "🌙 Ventas por Turnos":
         else procesar_df_turnos_2026(df_t26_raw)
     )
 
+    # ASEGURAR FORZOSAMENTE QUE TOTAL SEA NUMÉRICO PARA EVITAR CONCATENACIONES
+    if not df_t_25.empty and "TOTAL" in df_t_25.columns:
+        df_t_25["TOTAL"] = limpiar_serie_numerica(df_t_25["TOTAL"])
+    if not df_t_26.empty and "TOTAL" in df_t_26.columns:
+        df_t_26["TOTAL"] = limpiar_serie_numerica(df_t_26["TOTAL"])
+
     st.subheader(
         f"🌙 Comparativa de Ventas por Turnos - {mes_seleccionado_turno} (2025"
         " vs 2026)"
@@ -874,7 +884,6 @@ elif menu_principal == "🛒 Tienda Full":
                 else 0.0
             )
 
-            # Filtro exacto para sumar exclusivamente el rubro "BEBIDAS CALIENTES"
             mask_bebidas_cal = (
                 df_rubros_sum["Rubro"]
                 .str.upper()
