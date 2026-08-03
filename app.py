@@ -60,32 +60,25 @@ menu_principal = st.sidebar.selectbox(
     ["📊 DASHBOARD", "⛽ COMBUSTIBLES", "🛒 TIENDA FULL", "📦 BOXES", "🎯 +YPF"]
 )
 
-# Selector global de año en la barra lateral para comparar 2025 y 2026
-st.sidebar.markdown("---")
-st.sidebar.header("📅 Selector de Año")
-anio_activo = st.sidebar.selectbox("Año", [2026, 2025], index=0)
-
 # ==========================================
 # 1. DASHBOARD
 # ==========================================
 if menu_principal == "📊 DASHBOARD":
-    st.title(f"📊 Dashboard General ({anio_activo})")
-    st.info(f"Panel de control centralizado de la estación para el periodo {anio_activo} (Sincronizado con la nube).")
+    st.title("📊 Dashboard General (Comparativa 2026 vs 2025)")
+    st.info("Panel de control centralizado de la estación con comparativa interanual.")
 
 # ==========================================
 # 2. COMBUSTIBLES
 # ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
-    st.sidebar.header(f"📂 Mes Combustibles ({anio_activo})")
-    mes_seleccionado_comb = st.sidebar.selectbox(
-        "Mes Combustibles", meses_lista, key=f"mes_comb_{anio_activo}"
-    )
+    st.sidebar.header("📂 Seleccionar Mes")
+    mes_seleccionado_comb = st.sidebar.selectbox("Mes Combustibles", meses_lista)
 
-    # Opción de carga manual/local de archivo en la barra lateral
+    # Opción de carga manual de archivo para 2026
     st.sidebar.markdown("---")
-    st.sidebar.header("📥 Carga Manual de Archivo")
-    archivo_subido = st.sidebar.file_uploader(f"Subir Excel/CSV para {mes_seleccionado_comb} ({anio_activo})", type=["csv", "xlsx", "xls"], key=f"uploader_comb_{anio_activo}_{mes_seleccionado_comb}")
+    st.sidebar.header("📥 Carga Manual de Archivo (2026)")
+    archivo_subido = st.sidebar.file_uploader(f"Subir Excel/CSV 2026 - {mes_seleccionado_comb}", type=["csv", "xlsx", "xls"], key=f"uploader_comb_2026_{mes_seleccionado_comb}")
     if archivo_subido is not None:
         try:
             if archivo_subido.name.endswith('.csv'):
@@ -93,340 +86,207 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             else:
                 df_subido = pd.read_excel(archivo_subido)
             if not df_subido.empty:
-                st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_subido
-                st.sidebar.success("¡Archivo cargado con éxito!")
+                st.session_state["combustibles_2026"][mes_seleccionado_comb] = df_subido
+                st.sidebar.success("¡Archivo 2026 cargado con éxito!")
         except Exception as e:
             st.sidebar.error(f"Error al leer el archivo: {e}")
 
-    sheet_comb = f"combustibles_{mes_seleccionado_comb.lower()}_{anio_activo}"
+    sheet_comb_2026 = f"combustibles_{mes_seleccionado_comb.lower()}_2026"
+    sheet_comb_2025 = f"combustibles_{mes_seleccionado_comb.lower()}_2025"
 
     # Carga automática desde la nube si no está en memoria
-    if (
-        mes_seleccionado_comb not in st.session_state[f"combustibles_{anio_activo}"]
-        or st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb].empty
-    ):
-        df_nube_comb = cargar_desde_nube(sheet_comb)
-        if not df_nube_comb.empty:
-            st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_nube_comb
+    if mes_seleccionado_comb not in st.session_state["combustibles_2026"] or st.session_state["combustibles_2026"][mes_seleccionado_comb].empty:
+        df_nube_2026 = cargar_desde_nube(sheet_comb_2026)
+        if not df_nube_2026.empty:
+            st.session_state["combustibles_2026"][mes_seleccionado_comb] = df_nube_2026
 
-    if st.sidebar.button(f"🔄 Actualizar Datos desde la Nube"):
+    if mes_seleccionado_comb not in st.session_state["combustibles_2025"] or st.session_state["combustibles_2025"][mes_seleccionado_comb].empty:
+        df_nube_2025 = cargar_desde_nube(sheet_comb_2025)
+        if not df_nube_2025.empty:
+            st.session_state["combustibles_2025"][mes_seleccionado_comb] = df_nube_2025
+
+    if st.sidebar.button("🔄 Actualizar Datos desde la Nube"):
         st.cache_data.clear()
-        st.session_state[f"combustibles_{anio_activo}"].pop(mes_seleccionado_comb, None)
-        df_nube_comb = cargar_desde_nube(sheet_comb)
-        if not df_nube_comb.empty:
-            st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_nube_comb
+        st.session_state["combustibles_2026"].pop(mes_seleccionado_comb, None)
+        st.session_state["combustibles_2025"].pop(mes_seleccionado_comb, None)
         st.rerun()
 
-    df_c = st.session_state[f"combustibles_{anio_activo}"].get(mes_seleccionado_comb, pd.DataFrame())
+    df_2026 = st.session_state["combustibles_2026"].get(mes_seleccionado_comb, pd.DataFrame())
+    df_2025 = st.session_state["combustibles_2025"].get(mes_seleccionado_comb, pd.DataFrame())
 
-    st.subheader(f"⛽ Gestión y Ventas de COMBUSTIBLES - {mes_seleccionado_comb} ({anio_activo})")
+    st.subheader(f"⛽ COMBUSTIBLES - {mes_seleccionado_comb} (VS 2026 vs 2025)")
 
-    if not df_c.empty:
-        # Subir la primera fila como encabezado si contiene los nombres reales
-        if len(df_c) > 0 and any("fecha" in str(v).lower() for v in df_c.iloc[0].values):
-            df_c.columns = df_c.iloc[0].astype(str).str.strip()
-            df_c = df_c.iloc[1:].reset_index(drop=True)
+    # Procesar datos 2026
+    ventas_2026, vol_2026, desp_2026 = 0, 0, 0
+    if not df_2026.empty:
+        if len(df_2026) > 0 and any("fecha" in str(v).lower() for v in df_2026.iloc[0].values):
+            df_2026.columns = df_2026.iloc[0].astype(str).str.strip()
+            df_2026 = df_2026.iloc[1:].reset_index(drop=True)
+        df_2026.columns = [str(c).strip() for c in df_2026.columns]
+        c_venta_26 = "Venta Total" if "Venta Total" in df_2026.columns else df_2026.columns[4]
+        c_vol_26 = "Volumen" if "Volumen" in df_2026.columns else df_2026.columns[3]
+        df_2026[c_venta_26] = pd.to_numeric(df_2026[c_venta_26], errors='coerce').fillna(0)
+        df_2026[c_vol_26] = pd.to_numeric(df_2026[c_vol_26], errors='coerce').fillna(0)
+        ventas_2026 = df_2026[c_venta_26].sum()
+        vol_2026 = df_2026[c_vol_26].sum()
+        desp_2026 = len(df_2026)
 
-        # Asegurar limpieza de nombres de columnas
-        df_c.columns = [str(c).strip() for c in df_c.columns]
-        
-        # Mapeo exacto de columnas según tu estructura requerida
-        c_fecha = "Fecha y Hora" if "Fecha y Hora" in df_c.columns else df_c.columns[0]
-        c_prod = "Producto" if "Producto" in df_c.columns else df_c.columns[2]
-        c_vol = "Volumen" if "Volumen" in df_c.columns else df_c.columns[3]
-        c_venta = "Venta Total" if "Venta Total" in df_c.columns else df_c.columns[4]
-        
-        # Convertir a numéricos de forma segura
-        df_c[c_venta] = pd.to_numeric(df_c[c_venta], errors='coerce').fillna(0)
-        df_c[c_vol] = pd.to_numeric(df_c[c_vol], errors='coerce').fillna(0)
-        
-        total_ventas = df_c[c_venta].sum()
-        total_despachos = len(df_c)
+    # Procesar datos 2025
+    ventas_2025, vol_2025, desp_2025 = 0, 0, 0
+    if not df_2025.empty:
+        if len(df_2025) > 0 and any("fecha" in str(v).lower() for v in df_2025.iloc[0].values):
+            df_2025.columns = df_2025.iloc[0].astype(str).str.strip()
+            df_2025 = df_2025.iloc[1:].reset_index(drop=True)
+        df_2025.columns = [str(c).strip() for c in df_2025.columns]
+        c_venta_25 = "Venta Total" if "Venta Total" in df_2025.columns else df_2025.columns[4]
+        c_vol_25 = "Volumen" if "Volumen" in df_2025.columns else df_2025.columns[3]
+        df_2025[c_venta_25] = pd.to_numeric(df_2025[c_venta_25], errors='coerce').fillna(0)
+        df_2025[c_vol_25] = pd.to_numeric(df_2025[c_vol_25], errors='coerce').fillna(0)
+        ventas_2025 = df_2025[c_venta_25].sum()
+        vol_2025 = df_2025[c_vol_25].sum()
+        desp_2025 = len(df_2025)
 
-        # Métricas principales arriba
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("📦 Cantidad de Despachos", formato_arg(total_despachos))
-        with col2:
-            st.metric("⛽ Ventas Totales", formato_arg(total_ventas, 2 if total_ventas % 1 != 0 else 0))
+    # Métricas comparativas lado a lado
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        diff_ventas = ((ventas_2026 - ventas_2025) / ventas_2025 * 100) if ventas_2025 > 0 else 0
+        st.metric("⛽ Ventas Totales ($) 2026", f"$ {formato_arg(ventas_2026, 2)}", delta=f"{diff_ventas:+.2f}% vs 2025 ($ {formato_arg(ventas_2025, 2)})")
+    with col2:
+        diff_vol = ((vol_2026 - vol_2025) / vol_2025 * 100) if vol_2025 > 0 else 0
+        st.metric("📦 Volumen Total (L) 2026", f"{formato_arg(vol_2026, 2)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_2025, 2)} L)")
+    with col3:
+        diff_desp = ((desp_2026 - desp_2025) / desp_2025 * 100) if desp_2025 > 0 else 0
+        st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
 
-        st.markdown("---")
-
-        # Mix de Ventas por Producto (Naftas y Diésel) usando Volumen
-        st.markdown("### 📊 Mix de Ventas por Producto")
-        if c_prod in df_c.columns:
-            df_c['prod_lower'] = df_c[c_prod].astype(str).str.lower()
-            
-            vol_super = df_c[df_c['prod_lower'].str.contains('super|ns xxi', case=False, na=False)][c_vol].sum()
-            vol_infinia_nafta = df_c[df_c['prod_lower'].str.contains('infinia', case=False, na=False) & ~df_c['prod_lower'].str.contains('diesel', case=False, na=False)][c_vol].sum()
-            total_naftas = vol_super + vol_infinia_nafta
-
-            vol_d500 = df_c[df_c['prod_lower'].str.contains('500|d500|diesel 500', case=False, na=False)][c_vol].sum()
-            vol_infinia_diesel = df_c[df_c['prod_lower'].str.contains('infinia diesel|diesel infinia|go', case=False, na=False)][c_vol].sum()
-            total_diesel = vol_d500 + vol_infinia_diesel
-
-            col_mix1, col_mix2 = st.columns(2)
-            with col_mix1:
-                st.markdown("#### 🟢 Mix Naftas (Super / NS XXI vs Infinia)")
-                if total_naftas > 0:
-                    pct_super = (vol_super / total_naftas) * 100
-                    pct_infinia = (vol_infinia_nafta / total_naftas) * 100
-                    df_mix_naftas = pd.DataFrame({
-                        "Producto": ["Super / NS XXI", "Infinia"],
-                        "Volumen (L)": [formato_arg(vol_super, 2), formato_arg(vol_infinia_nafta, 2)],
-                        "Mix (%)": [f"{pct_super:.2f}%", f"{pct_infinia:.2f}%"]
-                    })
-                    st.dataframe(df_mix_naftas, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Procesando mix de naftas...")
-
-            with col_mix2:
-                st.markdown("#### 🛢️ Mix Diésel (GO - INFINIA DIESEL vs D. DIESEL 500)")
-                if total_diesel > 0:
-                    pct_d500 = (vol_d500 / total_diesel) * 100
-                    pct_inf_diesel = (vol_infinia_diesel / total_diesel) * 100
-                    df_mix_diesel = pd.DataFrame({
-                        "Producto": ["D. Diesel 500", "GO - Infinia Diesel"],
-                        "Volumen (L)": [formato_arg(vol_d500, 2), formato_arg(vol_infinia_diesel, 2)],
-                        "Mix (%)": [f"{pct_d500:.2f}%", f"{pct_inf_diesel:.2f}%"]
-                    })
-                    st.dataframe(df_mix_diesel, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Procesando mix de diésel...")
-        else:
-            st.info("Procesando mix de productos...")
-
-        st.markdown("---")
-        st.markdown("### 📋 Detalle General de Cargas")
-        df_mostrar = df_c.drop(columns=[c for c in df_c.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
-        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
-
-        # Desplegable para ver los datos de comparación del año anterior (2025 si activo es 2026, o viceversa)
-        anio_comparacion = 2025 if anio_activo == 2026 else 2026
-        sheet_comp = f"combustibles_{mes_seleccionado_comb.lower()}_{anio_comparacion}"
-
-        if (
-            mes_seleccionado_comb not in st.session_state[f"combustibles_{anio_comparacion}"]
-            or st.session_state[f"combustibles_{anio_comparacion}"][mes_seleccionado_comb].empty
-        ):
-            df_nube_comp = cargar_desde_nube(sheet_comp)
-            if not df_nube_comp.empty:
-                st.session_state[f"combustibles_{anio_comparacion}"][mes_seleccionado_comb] = df_nube_comp
-
-        df_comp = st.session_state[f"combustibles_{anio_comparacion}"].get(mes_seleccionado_comb, pd.DataFrame())
-
-        with st.expander(f"📂 Ver Detalle de Cargas del año {anio_comparacion} ({mes_seleccionado_comb})"):
-            if not df_comp.empty:
-                if len(df_comp) > 0 and any("fecha" in str(v).lower() for v in df_comp.iloc[0].values):
-                    df_comp.columns = df_comp.iloc[0].astype(str).str.strip()
-                    df_comp = df_comp.iloc[1:].reset_index(drop=True)
-                df_comp.columns = [str(c).strip() for c in df_comp.columns]
-                df_mostrar_comp = df_comp.drop(columns=[c for c in df_comp.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
-                st.dataframe(df_mostrar_comp, use_container_width=True, hide_index=True)
-            else:
-                st.info(f"No hay registros de Combustibles en la nube para **{mes_seleccionado_comb} {anio_comparacion}**.")
+    st.markdown("---")
+    st.markdown(f"### 📋 Detalle General de Cargas - 2026 ({mes_seleccionado_comb})")
+    if not df_2026.empty:
+        df_mostrar_26 = df_2026.drop(columns=[c for c in df_2026.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
+        st.dataframe(df_mostrar_26, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Combustibles en la nube para **{mes_seleccionado_comb} {anio_activo}**.")
+        st.info(f"No hay registros en la nube para Combustibles 2026 - {mes_seleccionado_comb}.")
+
+    # Desplegable para ver los datos de 2025 por debajo
+    with st.expander(f"📂 Ver Detalle de Cargas del año 2025 ({mes_seleccionado_comb})"):
+        if not df_2025.empty:
+            df_mostrar_25 = df_2025.drop(columns=[c for c in df_2025.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
+            st.dataframe(df_mostrar_25, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No hay registros en la nube para Combustibles 2025 - {mes_seleccionado_comb}.")
 
 # ==========================================
 # 3. TIENDA FULL
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
-    st.sidebar.header(f"📂 Mes Full ({anio_activo})")
-    mes_seleccionado_full = st.sidebar.selectbox("Mes Full", meses_lista, key=f"mes_full_{anio_activo}")
+    st.sidebar.header("📂 Seleccionar Mes")
+    mes_seleccionado_full = st.sidebar.selectbox("Mes Full", meses_lista)
     
-    sheet_full = f"full_{mes_seleccionado_full.lower()}_{anio_activo}"
+    sheet_full_2026 = f"full_{mes_seleccionado_full.lower()}_2026"
+    sheet_full_2025 = f"full_{mes_seleccionado_full.lower()}_2025"
 
-    if (
-        mes_seleccionado_full not in st.session_state[f"full_{anio_activo}"]
-        or st.session_state[f"full_{anio_activo}"][mes_seleccionado_full].empty
-    ):
-        df_nube_full = cargar_desde_nube(sheet_full)
-        if not df_nube_full.empty:
-            st.session_state[f"full_{anio_activo}"][mes_seleccionado_full] = df_nube_full
+    if mes_seleccionado_full not in st.session_state["full_2026"] or st.session_state["full_2026"][mes_seleccionado_full].empty:
+        df_nube_full_26 = cargar_desde_nube(sheet_full_2026)
+        if not df_nube_full_26.empty:
+            st.session_state["full_2026"][mes_seleccionado_full] = df_nube_full_26
 
-    if st.sidebar.button(f"🔄 Actualizar Full desde la Nube"):
+    if mes_seleccionado_full not in st.session_state["full_2025"] or st.session_state["full_2025"][mes_seleccionado_full].empty:
+        df_nube_full_25 = cargar_desde_nube(sheet_full_2025)
+        if not df_nube_full_25.empty:
+            st.session_state["full_2025"][mes_seleccionado_full] = df_nube_full_25
+
+    if st.sidebar.button("🔄 Actualizar Full desde la Nube"):
         st.cache_data.clear()
-        st.session_state[f"full_{anio_activo}"].pop(mes_seleccionado_full, None)
-        df_nube_full = cargar_desde_nube(sheet_full)
-        if not df_nube_full.empty:
-            st.session_state[f"full_{anio_activo}"][mes_seleccionado_full] = df_nube_full
+        st.session_state["full_2026"].pop(mes_seleccionado_full, None)
+        st.session_state["full_2025"].pop(mes_seleccionado_full, None)
         st.rerun()
 
-    st.title(f"🛒 Tienda Full - {mes_seleccionado_full} ({anio_activo})")
-    df_rubros = st.session_state[f"full_{anio_activo}"].get(mes_seleccionado_full, pd.DataFrame())
+    st.title(f"🛒 Tienda Full - {mes_seleccionado_full} (VS 2026 vs 2025)")
+    df_rubros_26 = st.session_state["full_2026"].get(mes_seleccionado_full, pd.DataFrame())
+    df_rubros_25 = st.session_state["full_2025"].get(mes_seleccionado_full, pd.DataFrame())
 
-    if not df_rubros.empty:
-        cols_lower = {str(c).lower().strip(): c for c in df_rubros.columns}
-        col_codigo = next((cols_lower[c] for c in cols_lower if c in ["codigo", "código", "cod"]), None)
-        col_rubro = next((cols_lower[c] for c in cols_lower if c in ["rubro", "descripcion", "descripción", "categoria", "categoría"]), None)
-        col_cantidad = next((cols_lower[c] for c in cols_lower if c in ["cantidad", "cant", "unidades", "ventas"]), None)
-
-        if col_codigo and col_rubro and col_cantidad:
-            df_temp = df_rubros.rename(columns={col_codigo: "Codigo", col_rubro: "Rubro", col_cantidad: "Cantidad"})
-            df_temp["Cantidad"] = pd.to_numeric(df_temp["Cantidad"], errors="coerce").fillna(0)
-
-            df_rubros_sum = (
-                df_temp.groupby(["Codigo", "Rubro"])["Cantidad"]
-                .sum()
-                .reset_index()
-            )
-            df_rubros_sum = df_rubros_sum.sort_values(
-                by="Cantidad", ascending=False
-            ).reset_index(drop=True)
-
-            st.dataframe(
-                df_rubros_sum.style.format({"Cantidad": lambda x: formato_arg(x, 0)}),
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.dataframe(df_rubros, use_container_width=True, hide_index=True)
+    st.markdown(f"### 📋 Tienda Full - 2026")
+    if not df_rubros_26.empty:
+        st.dataframe(df_rubros_26, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Tienda Full en la nube para **{mes_seleccionado_full} {anio_activo}**.")
+        st.info(f"No hay registros de Tienda Full en la nube para 2026 - {mes_seleccionado_full}.")
+
+    with st.expander(f"📂 Ver Tienda Full del año 2025 ({mes_seleccionado_full})"):
+        if not df_rubros_25.empty:
+            st.dataframe(df_rubros_25, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No hay registros de Tienda Full en la nube para 2025 - {mes_seleccionado_full}.")
 
 # ==========================================
 # 4. BOXES
 # ==========================================
 elif menu_principal == "📦 BOXES":
     st.sidebar.markdown("---")
-    st.sidebar.header(f"📂 Mes Boxes ({anio_activo})")
-    mes_seleccionado_boxes = st.sidebar.selectbox(
-        "Mes Boxes", meses_lista, key=f"mes_boxes_{anio_activo}"
-    )
+    st.sidebar.header("📂 Seleccionar Mes")
+    mes_seleccionado_boxes = st.sidebar.selectbox("Mes Boxes", meses_lista)
 
-    sheet_boxes = f"boxes_{mes_seleccionado_boxes.lower()}_{anio_activo}"
+    sheet_boxes_2026 = f"boxes_{mes_seleccionado_boxes.lower()}_2026"
+    sheet_boxes_2025 = f"boxes_{mes_seleccionado_boxes.lower()}_2025"
 
-    if (
-        mes_seleccionado_boxes not in st.session_state[f"boxes_{anio_activo}"]
-        or st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes].empty
-    ):
-        df_nube_boxes = cargar_desde_nube(sheet_boxes)
-        if not df_nube_boxes.empty:
-            st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes] = df_nube_boxes
+    if mes_seleccionado_boxes not in st.session_state["boxes_2026"] or st.session_state["boxes_2026"][mes_seleccionado_boxes].empty:
+        df_nube_boxes_26 = cargar_desde_nube(sheet_boxes_2026)
+        if not df_nube_boxes_26.empty:
+            st.session_state["boxes_2026"][mes_seleccionado_boxes] = df_nube_boxes_26
 
-    if st.sidebar.button(f"🔄 Actualizar Boxes desde la Nube"):
+    if mes_seleccionado_boxes not in st.session_state["boxes_2025"] or st.session_state["boxes_2025"][mes_seleccionado_boxes].empty:
+        df_nube_boxes_25 = cargar_desde_nube(sheet_boxes_2025)
+        if not df_nube_boxes_25.empty:
+            st.session_state["boxes_2025"][mes_seleccionado_boxes] = df_nube_boxes_25
+
+    if st.sidebar.button("🔄 Actualizar Boxes desde la Nube"):
         st.cache_data.clear()
-        st.session_state[f"boxes_{anio_activo}"].pop(mes_seleccionado_boxes, None)
-        df_nube_boxes = cargar_desde_nube(sheet_boxes)
-        if not df_nube_boxes.empty:
-            st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes] = df_nube_boxes
+        st.session_state["boxes_2026"].pop(mes_seleccionado_boxes, None)
+        st.session_state["boxes_2025"].pop(mes_seleccionado_boxes, None)
         st.rerun()
 
-    df_b = st.session_state[f"boxes_{anio_activo}"].get(mes_seleccionado_boxes, pd.DataFrame())
+    df_b_26 = st.session_state["boxes_2026"].get(mes_seleccionado_boxes, pd.DataFrame())
+    df_b_25 = st.session_state["boxes_2025"].get(mes_seleccionado_boxes, pd.DataFrame())
 
-    st.subheader(f"📦 BOXES - {mes_seleccionado_boxes} ({anio_activo})")
+    st.subheader(f"📦 BOXES - {mes_seleccionado_boxes} (VS 2026 vs 2025)")
 
-    if not df_b.empty:
-        st.success(f"✅ Registros cargados: {len(df_b)} filas")
-        st.markdown("---")
-        st.dataframe(df_b, use_container_width=True, hide_index=True)
+    st.markdown(f"### 📋 Boxes - 2026")
+    if not df_b_26.empty:
+        st.dataframe(df_b_26, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Boxes en la nube para **{mes_seleccionado_boxes} {anio_activo}**.")
+        st.info(f"No hay registros de Boxes en la nube para 2026 - {mes_seleccionado_boxes}.")
+
+    with st.expander(f"📂 Ver Boxes del año 2025 ({mes_seleccionado_boxes})"):
+        if not df_b_25.empty:
+            st.dataframe(df_b_25, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No hay registros de Boxes en la nube para 2025 - {mes_seleccionado_boxes}.")
 
 # ==========================================
 # 5. TABLERO YPF
 # ==========================================
 elif menu_principal == "🎯 +YPF":
     st.sidebar.markdown("---")
-    st.sidebar.header(f"🎯 Configuración YPF ({anio_activo})")
-    mes_seleccionado_ypf = st.sidebar.selectbox(
-        "Mes YPF", meses_lista, key=f"mes_ypf_{anio_activo}"
-    )
+    st.sidebar.header("🎯 Configuración YPF")
+    mes_seleccionado_ypf = st.sidebar.selectbox("Mes YPF", meses_lista)
 
-    st.subheader(f"🎯 Tablero de Exigencias YPF - {mes_seleccionado_ypf} ({anio_activo})")
-
-    unidades_comida_real_calculado = 0
-    try:
-        if f"full_{anio_activo}" in st.session_state and mes_seleccionado_ypf in st.session_state[f"full_{anio_activo}"]:
-            df_full_temp = st.session_state[f"full_{anio_activo}"][mes_seleccionado_ypf]
-            cols_lower = {str(c).lower().strip(): c for c in df_full_temp.columns}
-            col_rubro = next((cols_lower[c] for c in cols_lower if c in ["rubro", "descripcion", "descripción", "categoria", "categoría"]), None)
-            col_cantidad = next((cols_lower[c] for c in cols_lower if c in ["cantidad", "cant", "unidades", "ventas"]), None)
-
-            if col_rubro and col_cantidad:
-                mask_comida = df_full_temp[col_rubro].astype(str).str.contains("Comida|Cafeteria|Cafetería", case=False, na=False)
-                unidades_comida_real_calculado = int(pd.to_numeric(df_full_temp.loc[mask_comida, col_cantidad], errors="coerce").sum())
-    except Exception:
-        unidades_comida_real_calculado = 0
-
-    if unidades_comida_real_calculado == 0:
-        unidades_comida_real_calculado = 3674
+    st.subheader(f"🎯 Tablero de Exigencias YPF - {mes_seleccionado_ypf} (2026)")
 
     datos_ypf_base = [
-        {
-            "Concepto": "Volumen Diesel m3 (Infinia Diesel + D500)",
-            "Objetivo mínimo": 59700.0,
-            "Objetivo máximo": 69700.0,
-            "Real": 59394.0,
-            "Puntos posibles": 20,
-        },
-        {
-            "Concepto": "Volumen nafta m3 (Infinia + Super)",
-            "Objetivo mínimo": 427000.0,
-            "Objetivo máximo": 498100.0,
-            "Real": 424652.0,
-            "Puntos posibles": 25,
-        },
-        {
-            "Concepto": "Mix nafta infinia",
-            "Objetivo mínimo": 30.70,
-            "Objetivo máximo": 35.80,
-            "Real": 35.98,
-            "Puntos posibles": 10,
-        },
-        {
-            "Concepto": "Volumen lubricante m3 (trimestral)",
-            "Objetivo mínimo": 2610.0,
-            "Objetivo máximo": 2900.0,
-            "Real": 2052.0,
-            "Puntos posibles": 10,
-        },
-        {
-            "Concepto": "Crosselling",
-            "Objetivo mínimo": 30.70,
-            "Objetivo máximo": 37.60,
-            "Real": 31.45,
-            "Puntos posibles": 5,
-        },
-        {
-            "Concepto": "Unidades totales (sin tabaco)",
-            "Objetivo mínimo": 9264.0,
-            "Objetivo máximo": 10808.0,
-            "Real": 9582.0,
-            "Puntos posibles": 10,
-        },
-        {
-            "Concepto": "Unidades Comida y Cafetería",
-            "Objetivo mínimo": 1930.0,
-            "Objetivo máximo": 2133.0,
-            "Real": float(unidades_comida_real_calculado),
-            "Puntos posibles": 10,
-        },
-        {
-            "Concepto": "Cliente Incognito",
-            "Objetivo mínimo": 75.0,
-            "Objetivo máximo": 100.0,
-            "Real": 91.80,
-            "Puntos posibles": 10,
-        }
+        {"Concepto": "Volumen Diesel m3 (Infinia Diesel + D500)", "Objetivo mínimo": 59700.0, "Objetivo máximo": 69700.0, "Real": 59394.0, "Puntos posibles": 20},
+        {"Concepto": "Volumen nafta m3 (Infinia + Super)", "Objetivo mínimo": 427000.0, "Objetivo máximo": 498100.0, "Real": 424652.0, "Puntos posibles": 25},
+        {"Concepto": "Mix nafta infinia", "Objetivo mínimo": 30.70, "Objetivo máximo": 35.80, "Real": 35.98, "Puntos posibles": 10},
+        {"Concepto": "Volumen lubricante m3 (trimestral)", "Objetivo mínimo": 2610.0, "Objetivo máximo": 2900.0, "Real": 2052.0, "Puntos posibles": 10},
+        {"Concepto": "Crosselling", "Objetivo mínimo": 30.70, "Objetivo máximo": 37.60, "Real": 31.45, "Puntos posibles": 5},
+        {"Concepto": "Unidades totales (sin tabaco)", "Objetivo mínimo": 9264.0, "Objetivo máximo": 10808.0, "Real": 9582.0, "Puntos posibles": 10},
+        {"Concepto": "Unidades Comida y Cafetería", "Objetivo mínimo": 1930.0, "Objetivo máximo": 2133.0, "Real": 3674.0, "Puntos posibles": 10},
+        {"Concepto": "Cliente Incognito", "Objetivo mínimo": 75.0, "Objetivo máximo": 100.0, "Real": 91.80, "Puntos posibles": 10}
     ]
 
     df_ypf = pd.DataFrame(datos_ypf_base)
-
-    st.markdown(f"### 📋 Planilla de Objetivos e Indicadores ({anio_activo})")
-    
-    df_ypf_editado = st.data_editor(
-        df_ypf,
-        use_container_width=True,
-        hide_index=True,
-        key=f"editor_ypf_{anio_activo}_{mes_seleccionado_ypf}"
-    )
+    st.data_editor(df_ypf, use_container_width=True, hide_index=True, key=f"editor_ypf_{mes_seleccionado_ypf}")
 
     st.markdown("---")
     st.subheader("📊 Resumen de Evaluación")
-
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(label="Puntos Totales Posibles", value="95")
