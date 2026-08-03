@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 
+# Configuración inicial de la página
 st.set_page_config(page_title="Gestión Estación YPF", layout="wide")
 
-# Inicialización de session_state si no existe
+# Inicialización de session_state
 if "full_2026" not in st.session_state:
     st.session_state.full_2026 = {}
 if "boxes_2026" not in st.session_state:
@@ -15,7 +16,7 @@ meses_lista = [
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ]
 
-URL_NUBE = ""  # Tu URL de Google Apps Script o API si la usas
+URL_NUBE = ""  # URL de tu API o Google Apps Script si la usas
 
 def cargar_desd_nube(sheet_name):
     try:
@@ -35,14 +36,23 @@ menu_principal = st.sidebar.selectbox(
     ["📊 DASHBOARD", "⛽ COMBUSTIBLES", "🛒 TIENDA FULL", "📦 BOXES", "🎯 +YPF"]
 )
 
+# ==========================================
+# 1. DASHBOARD
+# ==========================================
 if menu_principal == "📊 DASHBOARD":
     st.title("📊 Dashboard General")
-    st.info("Bienvenido al panel de control de la estación.")
+    st.info("Bienvenido al panel de control centralizado de la estación.")
 
+# ==========================================
+# 2. COMBUSTIBLES
+# ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.title("⛽ Gestión de Combustibles")
     st.info("Módulo de combustibles activo.")
 
+# ==========================================
+# 3. TIENDA FULL
+# ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes (Full)")
@@ -50,7 +60,6 @@ elif menu_principal == "🛒 TIENDA FULL":
     
     sheet_full_26 = f"full_{mes_seleccionado_full.lower()}_2026"
 
-    # Cargar desde la nube si está vacío
     if (
         mes_seleccionado_full not in st.session_state.full_2026
         or st.session_state.full_2026[mes_seleccionado_full].empty
@@ -66,10 +75,9 @@ elif menu_principal == "🛒 TIENDA FULL":
             st.session_state.full_2026[mes_seleccionado_full] = df_nube_full
         st.rerun()
 
-    # PANEL ADMIN (Subir Excel Tienda Full)
     with st.sidebar.expander("🔐 Panel Admin (Subir Excel Full)"):
         archivos_full = st.file_uploader(
-            f"Subir Planillas Full (2026)",
+            "Subir Planillas Full (2026)",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key=f"uploader_full_2026_{mes_seleccionado_full}",
@@ -98,7 +106,7 @@ elif menu_principal == "🛒 TIENDA FULL":
                     }
                     if URL_NUBE:
                         requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(f"¡Archivos de Full procesados correctamente!")
+                    st.success("¡Archivos de Full procesados correctamente!")
                 except Exception as e:
                     st.error(f"Error al guardar Full en la nube: {e}")
 
@@ -130,6 +138,9 @@ elif menu_principal == "🛒 TIENDA FULL":
     else:
         st.info(f"No hay cierres de Tienda Full cargados para el mes de **{mes_seleccionado_full}**. Subí tus planillas desde el panel lateral izquierdo.")
 
+# ==========================================
+# 4. BOXES
+# ==========================================
 elif menu_principal == "📦 BOXES":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes (Boxes)")
@@ -154,10 +165,9 @@ elif menu_principal == "📦 BOXES":
             st.session_state.boxes_2026[mes_seleccionado_boxes] = df_nube_boxes
         st.rerun()
 
-    # PANEL ADMIN (Subir Excel Boxes)
     with st.sidebar.expander("🔐 Panel Admin (Subir Excel Boxes)"):
         archivos_boxes = st.file_uploader(
-            f"Subir Planillas Boxes (2026)",
+            "Subir Planillas Boxes (2026)",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key=f"uploader_boxes_2026_{mes_seleccionado_boxes}",
@@ -186,7 +196,7 @@ elif menu_principal == "📦 BOXES":
                     }
                     if URL_NUBE:
                         requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(f"¡Archivos de Boxes procesados correctamente!")
+                    st.success("¡Archivos de Boxes procesados correctamente!")
                 except Exception as e:
                     st.error(f"Error al guardar Boxes en la nube: {e}")
 
@@ -201,6 +211,9 @@ elif menu_principal == "📦 BOXES":
     else:
         st.info(f"No hay registros de Boxes cargados para el mes de **{mes_seleccionado_boxes}**. Subí tus planillas desde el panel lateral izquierdo.")
 
+# ==========================================
+# 5. TABLERO YPF
+# ==========================================
 elif menu_principal == "🎯 +YPF":
     st.sidebar.markdown("---")
     st.sidebar.header("🎯 Configuración YPF")
@@ -211,7 +224,6 @@ elif menu_principal == "🎯 +YPF":
     st.subheader(f"🎯 Tablero de Exigencias YPF - {mes_seleccionado_ypf} (2026)")
     st.markdown("Control centralizado de objetivos, cumplimiento y puntajes de la estación.")
 
-    # Extracción automática de Comida y Cafetería desde Tienda Full si existe
     unidades_comida_real_calculado = 0
     try:
         if "full_2026" in st.session_state and mes_seleccionado_ypf in st.session_state.full_2026:
@@ -223,7 +235,7 @@ elif menu_principal == "🎯 +YPF":
         unidades_comida_real_calculado = 0
 
     if unidades_comida_real_calculado == 0:
-        unidades_comida_real_calculado = 3674  # Valor de referencia por defecto si no hay datos cargados
+        unidades_comida_real_calculado = 3674
 
     datos_ypf_base = [
         {
@@ -287,7 +299,7 @@ elif menu_principal == "🎯 +YPF":
     df_ypf = pd.DataFrame(datos_ypf_base)
 
     st.markdown("### 📋 Planilla de Objetivos e Indicadores")
-    st.info("💡 El valor **Real** de *Unidades Comida y Cafetería* se actualiza automáticamente según lo que cargues en la sección de **Tienda Full**.")
+    st.info("💡 El valor **Real** de *Unidades Comida y Cafetería* se actualiza automáticamente según los datos cargados en **Tienda Full**.")
 
     df_ypf_editado = st.data_editor(
         df_ypf,
