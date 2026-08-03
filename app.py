@@ -22,10 +22,12 @@ meses_lista = [
 # Tu URL de Google Apps Script conectada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
+# Optimizado con caché para velocidad instantánea
+@st.cache_data(ttl=300, show_spinner="Cargando desde la nube...")
 def cargar_desd_nube(sheet_name):
     try:
         if URL_NUBE:
-            res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=15)
+            res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=10)
             if res.status_code == 200:
                 data = res.json()
                 if "rows" in data and "headers" in data and data["rows"]:
@@ -73,6 +75,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_nube_comb
 
     if st.sidebar.button(f"🔄 Recargar Combustibles {anio_activo} desde la Nube"):
+        st.cache_data.clear() # Limpia la caché para forzar descarga fresca
         st.session_state[f"combustibles_{anio_activo}"].pop(mes_seleccionado_comb, None)
         df_nube_comb = cargar_desd_nube(sheet_comb)
         if not df_nube_comb.empty:
@@ -91,7 +94,6 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             lista_dfs_comb = []
             for arq in archivos_comb:
                 try:
-                    # Lee directamente desde la fila 1 (encabezado en row 0)
                     df_c = pd.read_excel(arq, header=0)
                     df_c.columns = [str(c).strip() for c in df_c.columns]
                     lista_dfs_comb.append(df_c)
@@ -110,7 +112,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                         "rows": df_para_nube.values.tolist(),
                     }
                     if URL_NUBE:
-                        requests.post(URL_NUBE, json=payload, timeout=60)
+                        requests.post(URL_NUBE, json=payload, timeout=30)
+                    st.cache_data.clear()
                     st.success(f"¡Combustibles de {anio_activo} guardados en la nube!")
                 except Exception as e:
                     st.error(f"Error al guardar en la nube: {e}")
@@ -145,6 +148,7 @@ elif menu_principal == "🛒 TIENDA FULL":
             st.session_state[f"full_{anio_activo}"][mes_seleccionado_full] = df_nube_full
 
     if st.sidebar.button(f"🔄 Recargar Full {anio_activo} desde la Nube"):
+        st.cache_data.clear()
         st.session_state[f"full_{anio_activo}"].pop(mes_seleccionado_full, None)
         df_nube_full = cargar_desd_nube(sheet_full)
         if not df_nube_full.empty:
@@ -181,7 +185,8 @@ elif menu_principal == "🛒 TIENDA FULL":
                         "rows": df_para_nube.values.tolist(),
                     }
                     if URL_NUBE:
-                        requests.post(URL_NUBE, json=payload, timeout=60)
+                        requests.post(URL_NUBE, json=payload, timeout=30)
+                    st.cache_data.clear()
                     st.success(f"¡Full de {anio_activo} guardado en la nube!")
                 except Exception as e:
                     st.error(f"Error al guardar en la nube: {e}")
@@ -243,6 +248,7 @@ elif menu_principal == "📦 BOXES":
             st.session_state[f"boxes_{anio_activo}"][mes_seleccionado_boxes] = df_nube_boxes
 
     if st.sidebar.button(f"🔄 Recargar Boxes {anio_activo} desde la Nube"):
+        st.cache_data.clear()
         st.session_state[f"boxes_{anio_activo}"].pop(mes_seleccionado_boxes, None)
         df_nube_boxes = cargar_desd_nube(sheet_boxes)
         if not df_nube_boxes.empty:
@@ -279,7 +285,8 @@ elif menu_principal == "📦 BOXES":
                         "rows": df_para_nube.values.tolist(),
                     }
                     if URL_NUBE:
-                        requests.post(URL_NUBE, json=payload, timeout=60)
+                        requests.post(URL_NUBE, json=payload, timeout=30)
+                    st.cache_data.clear()
                     st.success(f"¡Boxes de {anio_activo} guardados en la nube!")
                 except Exception as e:
                     st.error(f"Error al guardar en la nube: {e}")
