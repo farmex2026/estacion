@@ -177,7 +177,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
         st.markdown("---")
         st.markdown("### 📋 Detalle General de Cargas")
-        df_mostrar = df_c.drop(columns=[c for c in ['prod_lower'] if c in df_c.columns], errors='ignore')
+        df_mostrar = df_c.drop(columns=[c for c in df_c.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
         st.info(f"No hay registros de Combustibles en la nube para **{mes_seleccionado_comb} {anio_activo}**.")
