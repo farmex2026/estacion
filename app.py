@@ -287,12 +287,27 @@ def procesar_archivo_full_html(archivo):
         ]
 
         cierre_nro = ""
+        ultimo_ticket = ""
         rubros_data = []
         capturando_rubros = False
 
         for linea in lineas:
             if "CIERRE DE CAJA NRO:" in linea:
                 cierre_nro = linea
+
+            if "FACTURAS (B)" in linea.upper():
+                match_ult = re.search(r"ULT:\s*(\d+)", linea, re.IGNORECASE)
+                if match_ult:
+                    ultimo_ticket = match_ult.group(1)
+            elif (
+                "FACTURAS" in linea.upper()
+                and "ULT:" in linea.upper()
+                and not ultimo_ticket
+            ):
+                match_ult = re.search(r"ULT:\s*(\d+)", linea, re.IGNORECASE)
+                if match_ult:
+                    ultimo_ticket = match_ult.group(1)
+
             if "RUBRO                  CANTIDAD  IMPORTE" in linea:
                 capturando_rubros = True
                 continue
@@ -321,6 +336,7 @@ def procesar_archivo_full_html(archivo):
             "archivo": archivo.name,
             "cierre": cierre_nro,
             "fecha": fecha_str,
+            "ultimo_ticket": ultimo_ticket,
             "rubros": rubros_data,
         }
     except Exception as e:
@@ -971,6 +987,7 @@ elif menu_principal == "🛒 Tienda Full":
             cierre_nro = (
                 match_cierre.group(1) if match_cierre else str(cierre_raw)
             )
+            ultimo_ticket = row.get("ultimo_ticket", "")
 
             rubros = row.get("rubros", [])
             cant_elaborada = 0
@@ -994,10 +1011,11 @@ elif menu_principal == "🛒 Tienda Full":
                 "Comida Elaborada (02-241)": cant_elaborada,
                 "Comida Envasada (02-198)": cant_envasada,
                 "Bebidas Calientes (02-232)": cant_calientes,
+                "Último Ticket": ultimo_ticket,
             })
 
         df_mostrar_26 = pd.DataFrame(lista_cierres_det)
-        
+
         col_cierres1, _ = st.columns([1, 1])
         with col_cierres1:
             st.dataframe(
