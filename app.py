@@ -75,7 +75,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             st.session_state[f"combustibles_{anio_activo}"][mes_seleccionado_comb] = df_nube_comb
 
     if st.sidebar.button(f"🔄 Recargar Combustibles {anio_activo} desde la Nube"):
-        st.cache_data.clear() # Limpia la caché para forzar descarga fresca
+        st.cache_data.clear()
         st.session_state[f"combustibles_{anio_activo}"].pop(mes_seleccionado_comb, None)
         df_nube_comb = cargar_desd_nube(sheet_comb)
         if not df_nube_comb.empty:
@@ -123,11 +123,104 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     st.subheader(f"⛽ Gestión y Ventas de COMBUSTIBLES - {mes_seleccionado_comb} ({anio_activo})")
 
     if not df_c.empty:
-        st.success(f"✅ Registros cargados: {len(df_c)} filas")
+        # Detectar columnas automáticamente de forma flexible
+        cols_map = {str(c).lower().strip(): c for c in df_c.columns}
+        c_fecha = next((cols_map[c] for c in cols_map if "fecha" in c), None)
+        c_surtidor = next((cols_map[c] for c in cols_map if "surtidor" in c or "manguera" in c), None)
+        c_prod = next((cols_map[c] for c in cols_map if "producto" in c), None)
+        c_vol = next((cols_map[c] for c in cols_map if "volumen" in c), None)
+        c_desp = next((cols_map[c] for c in cols_map if "despacho" in c or "cant" in c), None)
+        c_venta = next((cols_map[c] for c in cols_map if "venta" in c or "total" in c), None)
+
+        # Conversiones numéricas seguras
+        if c_vol: df_c[c_vol] = pd.to_numeric(df_c[c_vol], errors='coerce').fillna(0)
+        if c_desp: df_c[c_desp] = pd.to_numeric(df_c[c_desp], errors='coerce').fillna(0)
+        if c_venta: df_c[c_venta] = pd.to_numeric(df_c[c_venta], errors='coerce').fillna(0)
+
+        # Métricas por arriba de la tabla
+        total_despachos = int(df_c[c_desp].sum()) if c_desp else len(df_c)
+        total_venta = df_c[c_venta].sum() if c_venta else 0.0
+
+        mejor_dia = "N/D"
+        if c_fecha and c_venta:
+            try:
+                df_c['temp_dt'] = pd.to_datetime(df_c[c_fecha], errors='coerce')
+                dias_map = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
+                df_c['temp_dia'] = df_c['temp_dt'].dt.dayofweek.map(dias_map)
+                ventas_por_dia = df_c.groupby('temp_dia')[c_venta].sum()
+                if not ventas_por_dia.empty:
+                    mejor_dia = ventas_por_dia.idxmax()
+            except Exception:
+                pass
+
+        mejor_surtidor = "N/D"
+        if c_surtidor and c_venta:
+            ventas_surtidor = df_c.groupby(c_surtidor)[c_venta].sum()
+            if not ventas_surtidor.empty:
+                mejor_surtidor = str(ventas_surtidor.idxmax())
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("📦 Cant. Despachos", f"{total_despachos:,}")
+        with col2:
+            st.metric("💰 Venta Total", f"${total_venta:,.2f}")
+        with col3:
+            st.metric("📅 Día con más Venta", mejor_dia)
+        with col4:
+            st.metric("⛽ Surtidor Más Vendido", mejor_surtidor)
+
         st.markdown("---")
-        st.dataframe(df_c, use_container_width=True, hide_index=True)
+
+        # Mix de Ventas (Super / NS XXI vs Infinia y GO/Infinia Diesel vs D.Diesel 500)
+        st.markdown("### 📊 Mix de Ventas por Producto")
+        if c_prod and c_vol:
+            df_c['prod_lower'] = df_c[c_prod].astype(str).str.lower()
+            
+            vol_super = df_c[df_c['prod_lower'].str.contains('super|ns xxi', case=False, na=False)][c_vol].sum()
+            vol_infinia_nafta = df_c[df_c['prod_lower'].str.contains('infinia', case=False, na=False) & ~df_c['prod_lower'].str.contains('diesel', case=False, na=False)][c_vol].sum()
+            total_naftas = vol_super + vol_infinia_nafta
+
+            vol_d500 = df_c[df_c['prod_lower'].str.contains('500|d500|diesel 500', case=False, na=False)][c_vol].sum()
+            vol_infinia_diesel = df_c[df_c['prod_lower'].str.contains('infinia diesel|diesel infinia|go', case=False, na=False)][c_vol].sum()
+            total_diesel = vol_d500 + vol_infinia_diesel
+
+            col_mix1, col_mix2 = st.columns(2)
+            with col_mix1:
+                st.markdown("#### 🟢 Mix Naftas (Super / NS XXI vs Infinia)")
+                if total_naftas > 0:
+                    pct_super = (vol_super / total_naftas) * 100
+                    pct_infinia = (vol_infinia_nafta / total_naftas) * 100
+                    df_mix_naftas = pd.DataFrame({
+                        "Producto": ["Super / NS XXI", "Infinia"],
+                        "Volumen": [vol_super, vol_infinia_nafta],
+                        "Mix (%)": [f"{pct_super:.2f}%", f"{pct_infinia:.2f}%"]
+                    })
+                    st.dataframe(df_mix_naftas, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Sin registros de Naftas detectados para calcular mix.")
+
+            with col_mix2:
+                st.markdown("#### 🛢️ Mix Diésel (GO / Infinia Diesel vs D. Diesel 500)")
+                if total_diesel > 0:
+                    pct_d500 = (vol_d500 / total_diesel) * 100
+                    pct_inf_diesel = (vol_infinia_diesel / total_diesel) * 100
+                    df_mix_diesel = pd.DataFrame({
+                        "Producto": ["D. Diesel 500", "GO / Infinia Diesel"],
+                        "Volumen": [vol_d500, vol_infinia_diesel],
+                        "Mix (%)": [f"{pct_d500:.2f}%", f"{pct_inf_diesel:.2f}%"]
+                    })
+                    st.dataframe(df_mix_diesel, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Sin registros de Diésel detectados para calcular mix.")
+
+        st.markdown("---")
+        st.markdown("### 📋 Detalle de Cargas")
+        
+        # Limpiar columnas auxiliares temporales antes de mostrar la tabla
+        df_mostrar = df_c.drop(columns=[c for c in ['temp_dt', 'temp_dia', 'prod_lower'] if c in df_c.columns], errors='ignore')
+        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Combustibles para **{mes_seleccionado_comb} {anio_activo}**.")
+        st.info(f"No hay registros de Combustibles cargados para **{mes_seleccionado_comb} {anio_activo}**.")
 
 # ==========================================
 # 3. TIENDA FULL
@@ -222,7 +315,6 @@ elif menu_principal == "🛒 TIENDA FULL":
                 hide_index=True,
             )
         else:
-            st.warning("⚠️ Columnas detectadas de forma general:")
             st.dataframe(df_rubros, use_container_width=True, hide_index=True)
     else:
         st.info(f"No hay registros de Tienda Full para **{mes_seleccionado_full} {anio_activo}**.")
