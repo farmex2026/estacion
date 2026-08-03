@@ -22,16 +22,24 @@ meses_lista = [
 # Tu URL de Google Apps Script conectada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
-# Optimizado con caché para velocidad instantánea
-@st.cache_data(ttl=300, show_spinner="Cargando desde la nube...")
+# Función robusta y con caché corto para evitar que quede trabado en vacío al actualizar
+@st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desd_nube(sheet_name):
     try:
         if URL_NUBE:
-            res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=10)
+            res = requests.get(f"{URL_NUBE}?month={sheet_name}", timeout=15)
             if res.status_code == 200:
                 data = res.json()
-                if "rows" in data and "headers" in data and data["rows"]:
-                    return pd.DataFrame(data["rows"], columns=data["headers"])
+                # Compatible con múltiples formatos de respuesta de Google Apps Script
+                if isinstance(data, dict):
+                    rows = data.get("rows", data.get("data", []))
+                    headers = data.get("headers", data.get("columns", []))
+                    if rows and headers:
+                        return pd.DataFrame(rows, columns=headers)
+                    elif rows and not headers:
+                        return pd.DataFrame(rows)
+                elif isinstance(data, list) and len(data) > 0:
+                    return pd.DataFrame(data)
     except Exception as e:
         st.warning(f"No se pudo cargar desde la nube: {e}")
     return pd.DataFrame()
@@ -123,7 +131,6 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     st.subheader(f"⛽ Gestión y Ventas de COMBUSTIBLES - {mes_seleccionado_comb} ({anio_activo})")
 
     if not df_c.empty:
-        # Detectar columnas automáticamente de forma flexible
         cols_map = {str(c).lower().strip(): c for c in df_c.columns}
         c_fecha = next((cols_map[c] for c in cols_map if "fecha" in c), None)
         c_surtidor = next((cols_map[c] for c in cols_map if "surtidor" in c or "manguera" in c), None)
@@ -132,12 +139,10 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         c_desp = next((cols_map[c] for c in cols_map if "despacho" in c or "cant" in c), None)
         c_venta = next((cols_map[c] for c in cols_map if "venta" in c or "total" in c), None)
 
-        # Conversiones numéricas seguras
         if c_vol: df_c[c_vol] = pd.to_numeric(df_c[c_vol], errors='coerce').fillna(0)
         if c_desp: df_c[c_desp] = pd.to_numeric(df_c[c_desp], errors='coerce').fillna(0)
         if c_venta: df_c[c_venta] = pd.to_numeric(df_c[c_venta], errors='coerce').fillna(0)
 
-        # Métricas por arriba de la tabla
         total_despachos = int(df_c[c_desp].sum()) if c_desp else len(df_c)
         total_venta = df_c[c_venta].sum() if c_venta else 0.0
 
@@ -171,7 +176,6 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
         st.markdown("---")
 
-        # Mix de Ventas (Super / NS XXI vs Infinia y GO/Infinia Diesel vs D.Diesel 500)
         st.markdown("### 📊 Mix de Ventas por Producto")
         if c_prod and c_vol:
             df_c['prod_lower'] = df_c[c_prod].astype(str).str.lower()
@@ -197,7 +201,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     })
                     st.dataframe(df_mix_naftas, use_container_width=True, hide_index=True)
                 else:
-                    st.info("Sin registros de Naftas detectados para calcular mix.")
+                    st.info("Sin registros de Naftas detectados.")
 
             with col_mix2:
                 st.markdown("#### 🛢️ Mix Diésel (GO / Infinia Diesel vs D. Diesel 500)")
@@ -211,12 +215,10 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     })
                     st.dataframe(df_mix_diesel, use_container_width=True, hide_index=True)
                 else:
-                    st.info("Sin registros de Diésel detectados para calcular mix.")
+                    st.info("Sin registros de Diésel detectados.")
 
         st.markdown("---")
         st.markdown("### 📋 Detalle de Cargas")
-        
-        # Limpiar columnas auxiliares temporales antes de mostrar la tabla
         df_mostrar = df_c.drop(columns=[c for c in ['temp_dt', 'temp_dia', 'prod_lower'] if c in df_c.columns], errors='ignore')
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
