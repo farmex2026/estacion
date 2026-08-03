@@ -106,6 +106,11 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     st.subheader(f"⛽ Gestión y Ventas de COMBUSTIBLES - {mes_seleccionado_comb} ({anio_activo})")
 
     if not df_c.empty:
+        # Subir la primera fila como encabezado si contiene los nombres reales
+        if len(df_c) > 0 and any("fecha" in str(v).lower() for v in df_c.iloc[0].values):
+            df_c.columns = df_c.iloc[0].astype(str).str.strip()
+            df_c = df_c.iloc[1:].reset_index(drop=True)
+
         # Asegurar limpieza de nombres de columnas
         df_c.columns = [str(c).strip() for c in df_c.columns]
         
