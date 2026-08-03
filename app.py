@@ -1,71 +1,75 @@
-else:
+import streamlit as st
+import pandas as pd
+import requests
+
+st.set_page_config(page_title="Gestión Estación YPF", layout="wide")
+
+# Inicialización de session_state si no existe
+if "full_2026" not in st.session_state:
+    st.session_state.full_2026 = {}
+if "boxes_2026" not in st.session_state:
+    st.session_state.boxes_2026 = {}
+
+meses_lista = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+]
+
+def cargar_desd_nube(sheet_name):
+    return pd.DataFrame()
+
+URL_NUBE = ""
+
+# Menú principal en la barra lateral
+menu_principal = st.sidebar.selectbox(
+    "Menú Principal", 
+    ["📊 DASHBOARD", "⛽ COMBUSTIBLES", "🛒 TIENDA FULL", "📦 BOXES", "🎯 +YPF"]
+)
+
+if menu_principal == "📊 DASHBOARD":
+    st.title("📊 Dashboard General")
+    st.info("Bienvenido al panel de control de la estación.")
+
+elif menu_principal == "⛽ COMBUSTIBLES":
+    st.title("⛽ Gestión de Combustibles")
+    st.info("Módulo de combustibles activo.")
+
+elif menu_principal == "🛒 TIENDA FULL":
+    st.title("🛒 Tienda Full")
+    mes_seleccionado_full = st.sidebar.selectbox("Mes Full", meses_lista, key="mes_full_menu")
+    
+    if mes_seleccionado_full in st.session_state.full_2026 and not st.session_state.full_2026[mes_seleccionado_full].empty:
+        df_rubros_26 = st.session_state.full_2026[mes_seleccionado_full]
+        if "Codigo" in df_rubros_26.columns and "Rubro" in df_rubros_26.columns and "Cantidad" in df_rubros_26.columns:
+            df_rubros_sum = (
+                df_rubros_26.groupby(["Codigo", "Rubro"])["Cantidad"]
+                .sum()
+                .reset_index()
+            )
+            df_rubros_sum = df_rubros_sum.sort_values(
+                by="Cantidad", ascending=False
+            ).reset_index(drop=True)
+
+            def fmt_entero(val):
+                return f"{int(val):,}"
+
+            st.dataframe(
+                df_rubros_sum.style.format({"Cantidad": fmt_entero}),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
             st.info("No hay datos de rubros en los archivos cargados de Tienda Full.")
     else:
         st.info(f"No hay cierres de Tienda Full cargados para el mes de **{mes_seleccionado_full}**.")
 
-
-# ==========================================
-# MENÚ 4: BOXES
-# ==========================================
 elif menu_principal == "📦 BOXES":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes (Boxes)")
     mes_seleccionado_boxes = st.sidebar.selectbox(
         "Mes Boxes", meses_lista, key="mes_boxes_trabajo"
     )
-
     sheet_boxes_26 = f"boxes_{mes_seleccionado_boxes.lower()}_2026"
-
-    if (
-        mes_seleccionado_boxes not in st.session_state.boxes_2026
-        or st.session_state.boxes_2026[mes_seleccionado_boxes].empty
-    ):
-        df_nube_boxes = cargar_desd_nube(sheet_boxes_26)
-        if not df_nube_boxes.empty:
-            st.session_state.boxes_2026[mes_seleccionado_boxes] = df_nube_boxes
-
-    if st.sidebar.button("🔄 Recargar Boxes desde la Nube"):
-        st.session_state.boxes_2026.pop(mes_seleccionado_boxes, None)
-        df_nube_boxes = cargar_desd_nube(sheet_boxes_26)
-        if not df_nube_boxes.empty:
-            st.session_state.boxes_2026[mes_seleccionado_boxes] = df_nube_boxes
-        st.rerun()
-
-    with st.sidebar.expander("🔐 Panel Admin (Subir Excel Boxes)"):
-        archivos_boxes = st.file_uploader(
-            f"Subir Planillas Boxes (2026)",
-            type=["xlsx", "xls"],
-            accept_multiple_files=True,
-            key=f"uploader_boxes_2026_{mes_seleccionado_boxes}",
-        )
-
-        if archivos_boxes:
-            lista_dfs_boxes = []
-            for arq in archivos_boxes:
-                try:
-                    df_b = pd.read_excel(arq)
-                    df_b.columns = [str(c).strip() for c in df_b.columns]
-                    lista_dfs_boxes.append(df_b)
-                except Exception as e:
-                    st.warning(f"No se pudo leer el archivo {arq.name}: {e}")
-
-            if lista_dfs_boxes:
-                df_boxes_concatenado = pd.concat(lista_dfs_boxes, ignore_index=True).drop_duplicates().reset_index(drop=True)
-                st.session_state.boxes_2026[mes_seleccionado_boxes] = df_boxes_concatenado
-
-                try:
-                    df_para_nube = df_boxes_concatenado.copy()
-                    df_para_nube = df_para_nube.fillna("").astype(str)
-                    payload = {
-                        "month": sheet_boxes_26,
-                        "headers": df_para_nube.columns.tolist(),
-                        "rows": df_para_nube.values.tolist(),
-                    }
-                    requests.post(URL_NUBE, json=payload, timeout=60)
-                    st.success(f"¡Archivos de Boxes procesados y guardados en la nube ({sheet_boxes_26})!")
-                except Exception as e:
-                    st.error(f"Error al guardar Boxes en la nube: {e}")
-
     df_b26 = st.session_state.boxes_2026.get(mes_seleccionado_boxes, pd.DataFrame())
 
     st.subheader(f"📦 Gestión y Ventas de BOXES - {mes_seleccionado_boxes} (2026)")
@@ -77,10 +81,6 @@ elif menu_principal == "📦 BOXES":
     else:
         st.info(f"No hay registros de Boxes cargados para el mes de **{mes_seleccionado_boxes}**.")
 
-
-# ==========================================
-# MENÚ: 🎯 +YPF (Exigencias y Tablero)
-# ==========================================
 elif menu_principal == "🎯 +YPF":
     st.sidebar.markdown("---")
     st.sidebar.header("🎯 Configuración YPF")
