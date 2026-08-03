@@ -91,7 +91,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             lista_dfs_comb = []
             for arq in archivos_comb:
                 try:
-                    df_c = pd.read_excel(arq)
+                    # Se configuro header=6 para que lea a partir de la fila 7 (A7)
+                    df_c = pd.read_excel(arq, header=6)
                     df_c.columns = [str(c).strip() for c in df_c.columns]
                     lista_dfs_comb.append(df_c)
                 except Exception as e:
