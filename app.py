@@ -10,6 +10,8 @@ if "full_2026" not in st.session_state:
     st.session_state.full_2026 = {}
 if "boxes_2026" not in st.session_state:
     st.session_state.boxes_2026 = {}
+if "combustibles_2026" not in st.session_state:
+    st.session_state.combustibles_2026 = {}
 
 meses_lista = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
@@ -47,8 +49,74 @@ if menu_principal == "📊 DASHBOARD":
 # 2. COMBUSTIBLES
 # ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
-    st.title("⛽ Gestión de Combustibles")
-    st.info("Módulo de combustibles activo.")
+    st.sidebar.markdown("---")
+    st.sidebar.header("📂 Seleccionar Mes (Combustibles)")
+    mes_seleccionado_comb = st.sidebar.selectbox(
+        "Mes Combustibles", meses_lista, key="mes_comb_trabajo"
+    )
+
+    sheet_comb_26 = f"combustibles_{mes_seleccionado_comb.lower()}_2026"
+
+    if (
+        mes_seleccionado_comb not in st.session_state.combustibles_2026
+        or st.session_state.combustibles_2026[mes_seleccionado_comb].empty
+    ):
+        df_nube_comb = cargar_desd_nube(sheet_comb_26)
+        if not df_nube_comb.empty:
+            st.session_state.combustibles_2026[mes_seleccionado_comb] = df_nube_comb
+
+    if st.sidebar.button("🔄 Recargar Combustibles desde la Nube"):
+        st.session_state.combustibles_2026.pop(mes_seleccionado_comb, None)
+        df_nube_comb = cargar_desd_nube(sheet_comb_26)
+        if not df_nube_comb.empty:
+            st.session_state.combustibles_2026[mes_seleccionado_comb] = df_nube_comb
+        st.rerun()
+
+    with st.sidebar.expander("🔐 Panel Admin (Subir Excel Combustibles)"):
+        archivos_comb = st.file_uploader(
+            "Subir Planillas Combustibles (2026)",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key=f"uploader_comb_2026_{mes_seleccionado_comb}",
+        )
+
+        if archivos_comb:
+            lista_dfs_comb = []
+            for arq in archivos_comb:
+                try:
+                    df_c = pd.read_excel(arq)
+                    df_c.columns = [str(c).strip() for c in df_c.columns]
+                    lista_dfs_comb.append(df_c)
+                except Exception as e:
+                    st.warning(f"No se pudo leer el archivo {arq.name}: {e}")
+
+            if lista_dfs_comb:
+                df_comb_concatenado = pd.concat(lista_dfs_comb, ignore_index=True).drop_duplicates().reset_index(drop=True)
+                st.session_state.combustibles_2026[mes_seleccionado_comb] = df_comb_concatenado
+
+                try:
+                    df_para_nube = df_comb_concatenado.copy().fillna("").astype(str)
+                    payload = {
+                        "month": sheet_comb_26,
+                        "headers": df_para_nube.columns.tolist(),
+                        "rows": df_para_nube.values.tolist(),
+                    }
+                    if URL_NUBE:
+                        requests.post(URL_NUBE, json=payload, timeout=60)
+                    st.success("¡Archivos de Combustibles procesados correctamente!")
+                except Exception as e:
+                    st.error(f"Error al guardar Combustibles en la nube: {e}")
+
+    df_c26 = st.session_state.combustibles_2026.get(mes_seleccionado_comb, pd.DataFrame())
+
+    st.subheader(f"⛽ Gestión y Ventas de COMBUSTIBLES - {mes_seleccionado_comb} (2026)")
+
+    if not df_c26.empty:
+        st.success(f"✅ Registros de Combustibles cargados: {len(df_c26)} filas")
+        st.markdown("---")
+        st.dataframe(df_c26, use_container_width=True, hide_index=True)
+    else:
+        st.info(f"No hay registros de Combustibles cargados para el mes de **{mes_seleccionado_comb}**. Subí tus planillas desde el panel lateral izquierdo.")
 
 # ==========================================
 # 3. TIENDA FULL
@@ -114,9 +182,18 @@ elif menu_principal == "🛒 TIENDA FULL":
     df_rubros_26 = st.session_state.full_2026.get(mes_seleccionado_full, pd.DataFrame())
 
     if not df_rubros_26.empty:
-        if "Codigo" in df_rubros_26.columns and "Rubro" in df_rubros_26.columns and "Cantidad" in df_rubros_26.columns:
+        # Búsqueda flexible de columnas para evitar fallos si el Excel tiene nombres distintos
+        cols_lower = {str(c).lower().strip(): c for c in df_rubros_26.columns}
+        col_codigo = next((cols_lower[c] for c in cols_lower if c in ["codigo", "código", "cod"]), None)
+        col_rubro = next((cols_lower[c] for c in cols_lower if c in ["rubro", "descripcion", "descripción", "categoria", "categoría"]), None)
+        col_cantidad = next((cols_lower[c] for c in cols_lower if c in ["cantidad", "cant", "unidades", "ventas"]), None)
+
+        if col_codigo and col_rubro and col_cantidad:
+            df_temp = df_rubros_26.rename(columns={col_codigo: "Codigo", col_rubro: "Rubro", col_cantidad: "Cantidad"})
+            df_temp["Cantidad"] = pd.to_numeric(df_temp["Cantidad"], errors="coerce").fillna(0)
+
             df_rubros_sum = (
-                df_rubros_26.groupby(["Codigo", "Rubro"])["Cantidad"]
+                df_temp.groupby(["Codigo", "Rubro"])["Cantidad"]
                 .sum()
                 .reset_index()
             )
@@ -133,7 +210,7 @@ elif menu_principal == "🛒 TIENDA FULL":
                 hide_index=True,
             )
         else:
-            st.warning("El archivo no tiene las columnas exactas 'Codigo', 'Rubro' y 'Cantidad'. Mostrando datos generales:")
+            st.warning("⚠️ No se detectaron exactamente las columnas de Código, Rubro/Descripción y Cantidad. Mostrando datos completos del archivo:")
             st.dataframe(df_rubros_26, use_container_width=True, hide_index=True)
     else:
         st.info(f"No hay cierres de Tienda Full cargados para el mes de **{mes_seleccionado_full}**. Subí tus planillas desde el panel lateral izquierdo.")
@@ -228,9 +305,13 @@ elif menu_principal == "🎯 +YPF":
     try:
         if "full_2026" in st.session_state and mes_seleccionado_ypf in st.session_state.full_2026:
             df_full_temp = st.session_state.full_2026[mes_seleccionado_ypf]
-            if "Rubro" in df_full_temp.columns and "Cantidad" in df_full_temp.columns:
-                mask_comida = df_full_temp["Rubro"].str.contains("Comida|Cafeteria|Cafetería", case=False, na=False)
-                unidades_comida_real_calculado = int(df_full_temp.loc[mask_comida, "Cantidad"].sum())
+            cols_lower = {str(c).lower().strip(): c for c in df_full_temp.columns}
+            col_rubro = next((cols_lower[c] for c in cols_lower if c in ["rubro", "descripcion", "descripción", "categoria", "categoría"]), None)
+            col_cantidad = next((cols_lower[c] for c in cols_lower if c in ["cantidad", "cant", "unidades", "ventas"]), None)
+
+            if col_rubro and col_cantidad:
+                mask_comida = df_full_temp[col_rubro].astype(str).str.contains("Comida|Cafeteria|Cafetería", case=False, na=False)
+                unidades_comida_real_calculado = int(pd.to_numeric(df_full_temp.loc[mask_comida, col_cantidad], errors="coerce").sum())
     except Exception:
         unidades_comida_real_calculado = 0
 
