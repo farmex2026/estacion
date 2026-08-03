@@ -19,7 +19,7 @@ meses_lista = [
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ]
 
-# Tu URL de Google Apps Script conectada
+# URL de Google Apps Script conectada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
 # Función robusta con caché corto para actualización instantánea
@@ -142,11 +142,20 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
     if not df_c.empty:
         cols_map = {str(c).lower().strip(): c for c in df_c.columns}
-        c_prod = next((cols_map[c] for c in cols_map if "producto" in c), None)
-        c_vol = next((cols_map[c] for c in cols_map if "volumen" in c), None)
+        
+        # Obtener la columna de Ventas Totales desde la COLUMNA 5 (índice 4)
+        c_vol = None
+        if len(df_c.columns) >= 5:
+            c_vol = df_c.columns[4]
+        else:
+            c_vol = next((cols_map[c] for c in cols_map if "volumen" in c or "litros" in c), None)
+
         c_desp = next((cols_map[c] for c in cols_map if "despacho" in c or "cant" in c), None)
-        c_surtidor = next((cols_map[c] for c in cols_map if any(k in c for k in ["surtidor", "surt", "isla", "manguera"])), None)
-        c_dia = next((cols_map[c] for c in cols_map if any(k in c for k in ["dia", "día", "semana", "fecha"])), None)
+
+        # Detección automática para Producto, Surtidor y Día
+        auto_prod = next((cols_map[c] for c in cols_map if any(k in c for k in ["producto", "combustible", "articulo", "tipo", "desc"])), None)
+        auto_surtidor = next((cols_map[c] for c in cols_map if any(k in c for k in ["surtidor", "surt", "isla", "manguera", "pos", "boca", "pico"])), None)
+        auto_dia = next((cols_map[c] for c in cols_map if any(k in c for k in ["dia", "día", "semana", "fecha", "fch", "date"])), None)
 
         if c_vol: df_c[c_vol] = pd.to_numeric(df_c[c_vol], errors='coerce').fillna(0)
         if c_desp: df_c[c_desp] = pd.to_numeric(df_c[c_desp], errors='coerce').fillna(0)
@@ -159,11 +168,29 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         with col1:
             st.metric("📦 Cantidad de Despachos", formato_arg(total_despachos))
         with col2:
-            st.metric("⛽ Ventas Totales (Litros)", formato_arg(total_volumen, 2 if total_volumen % 1 != 0 else 0))
+            st.metric("⛽ Ventas Totales (Columna 5)", formato_arg(total_volumen, 2 if total_volumen % 1 != 0 else 0))
 
         st.markdown("---")
 
-        # Bloque de Surtidores y Días de la semana alineados en columnas
+        # Panel de configuración y mapeo por si el usuario necesita ajustar alguna columna
+        with st.expander("⚙️ Ajuste Manual de Columnas (Si alguna no coincide automáticamente)", expanded=False):
+            lista_cols = list(df_c.columns)
+            col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+            with col_cfg1:
+                sel_p = st.selectbox("Columna de Producto", ["(Automático)"] + lista_cols, key=f"cfg_prod_{anio_activo}_{mes_seleccionado_comb}")
+                if sel_p != "(Automático)": auto_prod = sel_p
+            with col_cfg2:
+                sel_s = st.selectbox("Columna de Surtidor", ["(Automático)"] + lista_cols, key=f"cfg_surt_{anio_activo}_{mes_seleccionado_comb}")
+                if sel_s != "(Automático)": auto_surtidor = sel_s
+            with col_cfg3:
+                sel_d = st.selectbox("Columna de Día / Fecha", ["(Automático)"] + lista_cols, key=f"cfg_dia_{anio_activo}_{mes_seleccionado_comb}")
+                if sel_d != "(Automático)": auto_dia = sel_d
+
+        c_prod = auto_prod
+        c_surtidor = auto_surtidor
+        c_dia = auto_dia
+
+        # Bloque de Surtidores y Días alineados en columnas
         col_surt, col_dias = st.columns(2)
 
         with col_surt:
@@ -178,7 +205,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     hide_index=True
                 )
             else:
-                st.info("Columna de Surtidor no detectada en la planilla.")
+                st.info("Columna de Surtidor no detectada. Verificá el ajuste manual arriba.")
 
         with col_dias:
             st.markdown("### 📅 Ventas por Día")
@@ -191,11 +218,11 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     hide_index=True
                 )
             else:
-                st.info("Columna de Día/Fecha no detectada en la planilla.")
+                st.info("Columna de Día/Fecha no detectada. Verificá el ajuste manual arriba.")
 
         st.markdown("---")
 
-        # Mix de Ventas (Super / NS XXI vs Infinia y GO/Infinia Diesel vs D.Diesel 500)
+        # Mix de Ventas por Producto
         st.markdown("### 📊 Mix de Ventas por Producto")
         if c_prod and c_vol:
             df_c['prod_lower'] = df_c[c_prod].astype(str).str.lower()
@@ -236,6 +263,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                     st.dataframe(df_mix_diesel, use_container_width=True, hide_index=True)
                 else:
                     st.info("Sin registros de Diésel detectados.")
+        else:
+            st.info("Columna de Producto no detectada. Seleccioná la columna correcta en el panel de ajuste manual de arriba.")
 
         st.markdown("---")
         st.markdown("### 📋 Detalle General de Cargas")
