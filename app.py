@@ -184,6 +184,31 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.markdown("### 📋 Detalle General de Cargas")
         df_mostrar = df_c.drop(columns=[c for c in df_c.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+
+        # Desplegable para ver los datos de comparación del año anterior (2025 si activo es 2026, o viceversa)
+        anio_comparacion = 2025 if anio_activo == 2026 else 2026
+        sheet_comp = f"combustibles_{mes_seleccionado_comb.lower()}_{anio_comparacion}"
+
+        if (
+            mes_seleccionado_comb not in st.session_state[f"combustibles_{anio_comparacion}"]
+            or st.session_state[f"combustibles_{anio_comparacion}"][mes_seleccionado_comb].empty
+        ):
+            df_nube_comp = cargar_desde_nube(sheet_comp)
+            if not df_nube_comp.empty:
+                st.session_state[f"combustibles_{anio_comparacion}"][mes_seleccionado_comb] = df_nube_comp
+
+        df_comp = st.session_state[f"combustibles_{anio_comparacion}"].get(mes_seleccionado_comb, pd.DataFrame())
+
+        with st.expander(f"📂 Ver Detalle de Cargas del año {anio_comparacion} ({mes_seleccionado_comb})"):
+            if not df_comp.empty:
+                if len(df_comp) > 0 and any("fecha" in str(v).lower() for v in df_comp.iloc[0].values):
+                    df_comp.columns = df_comp.iloc[0].astype(str).str.strip()
+                    df_comp = df_comp.iloc[1:].reset_index(drop=True)
+                df_comp.columns = [str(c).strip() for c in df_comp.columns]
+                df_mostrar_comp = df_comp.drop(columns=[c for c in df_comp.columns if str(c).startswith('_') or c == 'prod_lower'], errors='ignore')
+                st.dataframe(df_mostrar_comp, use_container_width=True, hide_index=True)
+            else:
+                st.info(f"No hay registros de Combustibles en la nube para **{mes_seleccionado_comb} {anio_comparacion}**.")
     else:
         st.info(f"No hay registros de Combustibles en la nube para **{mes_seleccionado_comb} {anio_activo}**.")
 
