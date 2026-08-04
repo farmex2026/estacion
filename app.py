@@ -44,10 +44,14 @@ def limpiar_columnas(df):
     df.columns = cols_limpias
     return df
 
-# Función inteligente para extraer solo las cantidades de los rubros pedidos
+# Función inteligente para extraer las cantidades exactas según las reglas solicitadas
 def procesar_turno_full(df):
     if df.empty:
-        return {"Comida_y_Cafeteria": 0.0, "Cigarrillos": 0.0}
+        return {
+            "Bebidas_Calientes": 0.0,
+            "Comida_Elaborada_y_Envasada": 0.0,
+            "Cigarrillos": 0.0
+        }
     
     df = limpiar_columnas(df)
     
@@ -90,16 +94,21 @@ def procesar_turno_full(df):
     # Normalizar descripción para buscar los códigos exactos
     df["_desc_str"] = df[col_desc].astype(str).str.lower()
     
-    # 1. Comida y Cafetería: 02-232, 02-241, 02-198 (Suman juntas)
-    mask_comida = df["_desc_str"].str.contains('02-232|02-241|02-198|bebidas caliente|comida elaborad|comidas envasad', regex=True, na=False)
+    # 1. Bebidas Calientes: 02-232
+    mask_bebidas = df["_desc_str"].str.contains('02-232|bebidas caliente', regex=True, na=False)
+    val_bebidas = df[mask_bebidas]["_cant_num"].sum()
+    
+    # 2. Comida Elaborada (02-241) y Comida Envasada (02-198) sumadas juntas
+    mask_comida = df["_desc_str"].str.contains('02-241|02-198|comida elaborad|comidas envasad', regex=True, na=False)
     val_comida = df[mask_comida]["_cant_num"].sum()
     
-    # 2. Cigarrillos: 02-238
+    # 3. Cigarrillos: 02-238
     mask_cigarros = df["_desc_str"].str.contains('02-238|cigarrillos', regex=True, na=False)
     val_cigarros = df[mask_cigarros]["_cant_num"].sum()
     
     return {
-        "Comida_y_Cafeteria": val_comida,
+        "Bebidas_Calientes": val_bebidas,
+        "Comida_Elaborada_y_Envasada": val_comida,
         "Cigarrillos": val_cigarros
     }
 
@@ -279,7 +288,7 @@ elif menu_principal == "🛒 TIENDA FULL":
         if not df_nube.empty:
             st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_nube
         else:
-            st.session_state[f"full_calendar_{anio_full}"][mes_full] = pd.DataFrame(columns=["Dia", "Turno", "ID_Planilla", "Comida_y_Cafeteria", "Cigarrillos"])
+            st.session_state[f"full_calendar_{anio_full}"][mes_full] = pd.DataFrame(columns=["Dia", "Turno", "ID_Planilla", "Bebidas_Calientes", "Comida_Elaborada_y_Envasada", "Cigarrillos"])
 
     st.sidebar.markdown("---")
     st.sidebar.header("📋 Carga Rápida de Turno (Full)")
@@ -289,7 +298,7 @@ elif menu_principal == "🛒 TIENDA FULL":
     id_planilla_default = f"{str(dia_sel).zfill(2)}-{mes_full.lower()}-15641"
     id_planilla_ingresado = st.sidebar.text_input("Nº Planilla", value=id_planilla_default, key=f"id_planilla_{anio_full}_{mes_full}")
     
-    st.sidebar.info("Copiá la tabla completa del turno (`.htm`) y pegala acá. Extraerá las cantidades de **Comida/Cafetería** (02-232, 02-241, 02-198 sumadas) y **Cigarrillos** (02-238).")
+    st.sidebar.info("Copiá la tabla completa del turno y pegala acá. Extraerá:\n- **Bebidas Calientes** (02-232)\n- **Comida Elaborada y Envasada** (02-241 + 02-198 sumadas)\n- **Cigarrillos** (02-238)")
     texto_turno = st.sidebar.text_area("Pegar datos del turno (Ctrl + V)", height=120, key=f"txt_turno_{anio_full}_{mes_full}")
 
     if st.sidebar.button("💾 Guardar / Actualizar este Turno", key=f"btn_guardar_turno_{anio_full}_{mes_full}"):
@@ -302,7 +311,8 @@ elif menu_principal == "🛒 TIENDA FULL":
                     "Dia": dia_sel,
                     "Turno": turno_sel,
                     "ID_Planilla": id_planilla_ingresado,
-                    "Comida_y_Cafeteria": resultado_turno["Comida_y_Cafeteria"],
+                    "Bebidas_Calientes": resultado_turno["Bebidas_Calientes"],
+                    "Comida_Elaborada_y_Envasada": resultado_turno["Comida_Elaborada_y_Envasada"],
                     "Cigarrillos": resultado_turno["Cigarrillos"]
                 }
                 
@@ -317,7 +327,7 @@ elif menu_principal == "🛒 TIENDA FULL":
 
                 st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_combinado
                 guardar_en_nube(sheet_full_name, df_combinado)
-                st.sidebar.success(f"¡Turno {turno_sel} Día {dia_sel} guardado! (Comida/Café: {formato_arg(resultado_turno['Comida_y_Cafeteria'], 2)} | Cigarrillos: {formato_arg(resultado_turno['Cigarrillos'], 2)})")
+                st.sidebar.success(f"¡Turno guardado con éxito!")
             except Exception as e:
                 st.sidebar.error(f"Error al procesar el turno: {e}")
         else:
@@ -341,7 +351,8 @@ elif menu_principal == "🛒 TIENDA FULL":
         df_mostrar = df_mes.rename(columns={
             "Dia": "Día",
             "ID_Planilla": "Nº Planilla",
-            "Comida_y_Cafeteria": "Comida y Cafetería (Unid.)",
+            "Bebidas_Calientes": "Bebidas Calientes (Unid.)",
+            "Comida_Elaborada_y_Envasada": "Comida Elaborada y Envasada (Unid.)",
             "Cigarrillos": "Cigarrillos (Unid.)"
         })
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
@@ -355,19 +366,25 @@ elif menu_principal == "🛒 TIENDA FULL":
     df_26 = st.session_state["full_calendar_2026"].get(mes_full, pd.DataFrame())
     df_25 = st.session_state["full_calendar_2025"].get(mes_full, pd.DataFrame())
     
-    comida_26 = df_26["Comida_y_Cafeteria"].sum() if not df_26.empty and "Comida_y_Cafeteria" in df_26.columns else 0
-    comida_25 = df_25["Comida_y_Cafeteria"].sum() if not df_25.empty and "Comida_y_Cafeteria" in df_25.columns else 0
+    beb_26 = df_26["Bebidas_Calientes"].sum() if not df_26.empty and "Bebidas_Calientes" in df_26.columns else 0
+    beb_25 = df_25["Bebidas_Calientes"].sum() if not df_25.empty and "Bebidas_Calientes" in df_25.columns else 0
+    diff_beb = ((beb_26 - beb_25) / beb_25 * 100) if beb_25 > 0 else 0
+
+    comida_26 = df_26["Comida_Elaborada_y_Envasada"].sum() if not df_26.empty and "Comida_Elaborada_y_Envasada" in df_26.columns else 0
+    comida_25 = df_25["Comida_Elaborada_y_Envasada"].sum() if not df_25.empty and "Comida_Elaborada_y_Envasada" in df_25.columns else 0
     diff_comida = ((comida_26 - comida_25) / comida_25 * 100) if comida_25 > 0 else 0
 
     cigar_26 = df_26["Cigarrillos"].sum() if not df_26.empty and "Cigarrillos" in df_26.columns else 0
     cigar_25 = df_25["Cigarrillos"].sum() if not df_25.empty and "Cigarrillos" in df_25.columns else 0
     diff_cigar = ((cigar_26 - cigar_25) / cigar_25 * 100) if cigar_25 > 0 else 0
 
-    col_f1, col_f2 = st.columns(2)
+    col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1:
-        st.metric(f"☕ Comida y Cafetería (Unid.)", f"{formato_arg(comida_26, 2)} unid.", delta=f"{diff_comida:+.2f}% vs 2025 ({formato_arg(comida_25, 2)})")
+        st.metric(f"☕ Bebidas Calientes", f"{formato_arg(beb_26, 2)} unid.", delta=f"{diff_beb:+.2f}% vs 2025 ({formato_arg(beb_25, 2)})")
     with col_f2:
-        st.metric(f"🚬 Cigarrillos (Unid.)", f"{formato_arg(cigar_26, 2)} unid.", delta=f"{diff_cigar:+.2f}% vs 2025 ({formato_arg(cigar_25, 2)})")
+        st.metric(f"🍔 Comida Elaborada/Envasada", f"{formato_arg(comida_26, 2)} unid.", delta=f"{diff_comida:+.2f}% vs 2025 ({formato_arg(comida_25, 2)})")
+    with col_f3:
+        st.metric(f"🚬 Cigarrillos", f"{formato_arg(cigar_26, 2)} unid.", delta=f"{diff_cigar:+.2f}% vs 2025 ({formato_arg(cigar_25, 2)})")
 
 # ==========================================
 # 4. BOXES
