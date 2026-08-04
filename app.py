@@ -44,7 +44,7 @@ def limpiar_columnas(df):
     df.columns = cols_limpias
     return df
 
-# Lector universal ultra robusto para HTM/HTML de YPF
+# Lector universal ultra robusto para HTM/HTML, Excel y CSV de YPF
 def leer_archivo_universal(uploaded_file):
     if uploaded_file is None:
         return pd.DataFrame()
@@ -52,24 +52,21 @@ def leer_archivo_universal(uploaded_file):
     nombre = uploaded_file.name.lower()
     contenido_bytes = uploaded_file.read()
     
-    # 1. Si es HTML/HTM, intentamos parsearlo con BeautifulSoup y pandas
+    # 1. Si es HTML/HTM
     if nombre.endswith(('.htm', '.html')):
         for encoding in ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']:
             try:
                 html_str = contenido_bytes.decode(encoding, errors='ignore')
-                # Intentar leer tablas con pandas
                 dfs = pd.read_html(io.StringIO(html_str))
                 if dfs:
-                    # Buscamos la tabla que tenga más filas o columnas (la que contiene los datos del turno)
                     df_mas_grande = max(dfs, key=lambda d: d.shape[0] * d.shape[1])
                     if not df_mas_grande.empty:
                         return df_mas_grande
             except Exception:
                 continue
                 
-        # Si falló pd.read_html, intentamos extraer manualmente filas <tr> y celdas <td> con BeautifulSoup
         try:
-            soup = BeautifulSoup(contenido_bytes, 'html.parser')
+            soup = BeautifulSoup(html_str, 'html.parser')
             filas_datos = []
             for tr in soup.find_all('tr'):
                 cols = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
@@ -77,7 +74,6 @@ def leer_archivo_universal(uploaded_file):
                     filas_datos.append(cols)
             if filas_datos:
                 max_len = max(len(f) for f in filas_datos)
-                # Normalizar filas al mismo ancho
                 filas_norm = [f + [''] * (max_len - len(f)) for f in filas_datos]
                 return pd.DataFrame(filas_norm)
         except Exception:
@@ -92,7 +88,6 @@ def leer_archivo_universal(uploaded_file):
     except:
         pass
     
-    # Intentos genéricos por si el formato difiere
     for func in [pd.read_excel, pd.read_csv]:
         try:
             uploaded_file.seek(0)
@@ -102,60 +97,86 @@ def leer_archivo_universal(uploaded_file):
 
     return pd.DataFrame()
 
-def procesar_turno_full(df):
-    if df.empty:
-        return {
-            "Bebidas_Calientes": 0.0,
-            "Comida_Elaborada_y_Envasada": 0.0,
-            "Cigarrillos": 0.0
-        }, "DataFrame vacío"
+# Procesador infalible basado en análisis directo de texto HTML y filas
+def procesar_turno_full(uploaded_file):
+    contenido_bytes = uploaded_file.read()
+    uploaded_file.seek(0) # Reiniciar puntero por si se usa en otro lado
     
-    df = limpiar_columnas(df)
-    
+    html_str = ""
+    for encoding in ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']:
+        try:
+            html_str = contenido_bytes.decode(encoding, errors='ignore')
+            break
+        except:
+            continue
+            
+    if not html_str:
+        # Intentar leer como DataFrame tradicional si no es HTML
+        df_trad = leer_archivo_universal(uploaded_file)
+        if df_trad.empty:
+            return {"Bebidas_Calientes": 0.0, "Comida_Elaborada_y_Envasada": 0.0, "Cigarrillos": 0.0}, "Archivo vacío o no legible."
+        # Convertir DataFrame a texto plano por filas
+        filas_texto = [" ".join([str(val) for val in row.values]) for _, row in df_trad.iterrows()]
+    else:
+        soup = BeautifulSoup(html_str, 'html.parser')
+        filas = soup.find_all('tr')
+        if filas:
+            filas_texto = [tr.get_text(" ", strip=True) for tr in filas]
+        else:
+            filas_texto = html_str.replace('<br>', '\n').split('\n')
+
     val_bebidas = 0.0
     val_comida = 0.0
     val_cigarros = 0.0
-    
-    encontrados = []
-    
-    for idx, row in df.iterrows():
-        texto_fila = " ".join([str(val) for val in row.values]).lower()
+    logs = []
+
+    for texto_fila in filas_texto:
+        t_lower = texto_fila.lower()
         
-        es_bebida = bool(re.search(r'02-232|bebidas?\s*caliente', texto_fila))
-        es_comida = bool(re.search(r'02-241|02-198|comida\s*elaborad|comidas?\s*envasad', texto_fila))
-        es_cigarro = bool(re.search(r'02-238|cigarrillo', texto_fila))
+        # Detección flexible de los conceptos de YPF
+        es_bebida = bool(re.search(r'02-232|bebidas?\s*caliente', t_lower))
+        es_comida = bool(re.search(r'02-241|02-198|comida\s*elaborad|comidas?\s*envasad', t_lower))
+        es_cigarro = bool(re.search(r'02-238|cigarrillo', t_lower))
         
         if not (es_bebida or es_comida or es_cigarro):
             continue
             
-        cantidad_encontrada = 0.0
-        for col in df.columns:
-            val_str = str(row[col]).strip()
-            val_limpio = val_str.replace('$', '').replace(' ', '')
-            if ',' in val_limpio and '.' in val_limpio:
-                val_limpio = val_limpio.replace('.', '').replace(',', '.')
-            elif ',' in val_limpio:
-                val_limpio = val_limpio.replace(',', '.')
+        # Extraer tokens numéricos de la fila ignorando los códigos (que tienen guiones como 02-198)
+        tokens = texto_fila.replace('$', '').split()
+        cantidad = 0.0
+        
+        for token in tokens:
+            # Si el token es el código del producto (ej: 02-198), lo salteamos
+            if '-' in token and any(c.isdigit() for c in token):
+                continue
+                
+            # Limpiar token para convertir a float (maneja comas y puntos)
+            t_limpio = token.replace(',', '.') if ',' in token and '.' not in token else token.replace('.', '').replace(',', '.')
+            # Remover caracteres no numéricos extra al final (ej: comas sueltas)
+            t_limpio = re.sub(r'[^0-9.]', '', t_limpio)
             
+            if not t_limpio:
+                continue
+                
             try:
-                num = float(val_limpio)
-                if 0 <= num < 10000:
-                    cantidad_encontrada = num
-                    break 
+                num = float(t_limpio)
+                # Filtro lógico: la cantidad de unidades en un turno es razonable (< 5000)
+                if 0 <= num < 5000:
+                    cantidad = num
             except:
                 continue
                 
-        if es_bebida:
-            val_bebidas += cantidad_encontrada
-            encontrados.append(f"Bebidas Calientes: {cantidad_encontrada} (Fila: {texto_fila[:50]})")
-        elif es_comida:
-            val_comida += cantidad_encontrada
-            encontrados.append(f"Comida: {cantidad_encontrada} (Fila: {texto_fila[:50]})")
-        elif es_cigarro:
-            val_cigarros += cantidad_encontrada
-            encontrados.append(f"Cigarrillos: {cantidad_encontrada} (Fila: {texto_fila[:50]})")
-            
-    detalle_log = " | ".join(encontrados) if encontrados else "No se detectaron los códigos buscados en el archivo."
+        if es_bebida and cantidad > 0:
+            val_bebidas += cantidad
+            logs.append(f"☕ Bebidas: {cantidad} ({texto_fila[:40]})")
+        elif es_comida and cantidad > 0:
+            val_comida += cantidad
+            logs.append(f"🍔 Comida: {cantidad} ({texto_fila[:40]})")
+        elif es_cigarro and cantidad > 0:
+            val_cigarros += cantidad
+            logs.append(f"🚬 Cigarrillos: {cantidad} ({texto_fila[:40]})")
+
+    detalle_log = " | ".join(logs) if logs else "Se detectó concepto pero no se encontró la cantidad numérica."
     return {
         "Bebidas_Calientes": val_bebidas,
         "Comida_Elaborada_y_Envasada": val_comida,
@@ -258,15 +279,7 @@ elif menu_principal == "🛒 TIENDA FULL":
     if st.sidebar.button("💾 Procesar y Guardar este Turno", key=f"btn_guardar_turno_{anio_full}_{mes_full}"):
         if archivo_turno is not None:
             try:
-                df_nuevo = leer_archivo_universal(archivo_turno)
-                
-                # Depuración visual para ver qué leyó el archivo
-                if not df_nuevo.empty:
-                    st.success(f"Archivo leído con éxito. Dimensiones de la tabla: {df_nuevo.shape[0]} filas x {df_nuevo.shape[1]} columnas.")
-                else:
-                    st.error("El archivo se leyó pero devolvió una tabla vacía.")
-                
-                resultado_turno, log_depuracion = procesar_turno_full(df_nuevo)
+                resultado_turno, log_depuracion = procesar_turno_full(archivo_turno)
                 st.info(f"🔍 **Log de lectura:** {log_depuracion}")
                 
                 nueva_fila = {
@@ -289,9 +302,9 @@ elif menu_principal == "🛒 TIENDA FULL":
 
                 st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_combinado
                 guardar_en_nube(sheet_full_name, df_combinado)
-                st.sidebar.success(f"¡Turno Día {dia_sel} ({turno_sel}) guardado correctamente!")
+                st.sidebar.success(f"¡Turno Día {dia_sel} ({turno_sel}) procesado y guardado con éxito!")
             except Exception as e:
-                st.sidebar.error(f"Error crítico al procesar: {e}")
+                st.sidebar.error(f"Error al procesar: {e}")
         else:
             st.sidebar.warning("Por favor, subí un archivo antes de guardar.")
 
