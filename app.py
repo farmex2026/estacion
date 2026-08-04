@@ -44,30 +44,64 @@ def limpiar_columnas(df):
     df.columns = cols_limpias
     return df
 
-# Función para limpiar números y preparar el DataFrame de un turno
+# Función inteligente para extraer solo las cantidades de los rubros pedidos
 def procesar_turno_full(df):
     if df.empty:
-        return df
+        return {"Comida_y_Cafeteria": 0.0, "Cigarrillos": 0.0}
+    
     df = limpiar_columnas(df)
-    # Detectar columna de rubro/concepto
-    col_rubro = df.columns[0]
+    
+    # Encontrar la columna de descripción / rubro
+    col_desc = df.columns[0]
     for col in df.columns:
         c_low = str(col).lower()
         if any(k in c_low for k in ['rubro', 'descripcion', 'concepto', 'producto', 'item', 'detalle']):
-            col_rubro = col
+            col_desc = col
             break
-    
-    # Limpiar columnas numéricas
+            
+    # Encontrar la columna de cantidad (Unidades)
+    col_cant = None
     for col in df.columns:
-        if col == col_rubro:
+        if col == col_desc:
             continue
-        serie_str = df[col].astype(str).str.strip()
-        temp_col = serie_str.str.replace('$', '', regex=False).str.replace(' ', '', regex=False)
-        temp_col = temp_col.apply(lambda x: x.replace('.', '').replace(',', '.') if (',' in x and '.' in x) or (x.count('.') > 1) or (',' in x and x.find(',') > x.find('.')) else x.replace(',', '.'))
-        converted = pd.to_numeric(temp_col, errors='coerce')
-        if converted.notna().sum() > 0:
-            df[col] = converted.fillna(0)
-    return df
+        c_low = str(col).lower()
+        if any(k in c_low for k in ['cantidad', 'unidades', 'cant', 'qty', 'cnt']):
+            col_cant = col
+            break
+            
+    if not col_cant:
+        for col in df.columns:
+            if col == col_desc:
+                continue
+            temp_num = pd.to_numeric(df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
+            if temp_num.notna().sum() > 0:
+                col_cant = col
+                break
+                
+    if not col_cant:
+        col_cant = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+
+    # Limpiar y convertir a numérico la columna de cantidad
+    serie_cant = df[col_cant].astype(str).str.strip()
+    serie_cant = serie_cant.str.replace('$', '', regex=False).str.replace(' ', '', regex=False)
+    serie_cant = serie_cant.apply(lambda x: x.replace('.', '').replace(',', '.') if (',' in x and '.' in x) or (x.count('.') > 1) or (',' in x and x.find(',') > x.find('.')) else x.replace(',', '.'))
+    df["_cant_num"] = pd.to_numeric(serie_cant, errors='coerce').fillna(0)
+    
+    # Normalizar descripción para buscar los códigos exactos
+    df["_desc_str"] = df[col_desc].astype(str).str.lower()
+    
+    # 1. Comida y Cafetería: 02-232, 02-241, 02-198 (Suman juntas)
+    mask_comida = df["_desc_str"].str.contains('02-232|02-241|02-198|bebidas caliente|comida elaborad|comidas envasad', regex=True, na=False)
+    val_comida = df[mask_comida]["_cant_num"].sum()
+    
+    # 2. Cigarrillos: 02-238
+    mask_cigarros = df["_desc_str"].str.contains('02-238|cigarrillos', regex=True, na=False)
+    val_cigarros = df[mask_cigarros]["_cant_num"].sum()
+    
+    return {
+        "Comida_y_Cafeteria": val_comida,
+        "Cigarrillos": val_cigarros
+    }
 
 # Función robusta con caché corto para lectura desde la nube
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
@@ -230,7 +264,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
 
 # ==========================================
-# 3. TIENDA FULL (CALENDARIO POR DÍA Y TURNO)
+# 3. TIENDA FULL (CALENDARIO POR DÍA Y TURNO - CANTIDADES)
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
@@ -240,59 +274,50 @@ elif menu_principal == "🛒 TIENDA FULL":
 
     sheet_full_name = f"full_calendar_{mes_full.lower()}_{anio_full}"
 
-    # Cargar datos iniciales desde nube si el session_state está vacío
     if mes_full not in st.session_state[f"full_calendar_{anio_full}"]:
         df_nube = cargar_desde_nube(sheet_full_name)
         if not df_nube.empty:
             st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_nube
         else:
-            st.session_state[f"full_calendar_{anio_full}"][mes_full] = pd.DataFrame(columns=["Dia", "Turno", "ID_Planilla", "Rubro", "Valor"])
+            st.session_state[f"full_calendar_{anio_full}"][mes_full] = pd.DataFrame(columns=["Dia", "Turno", "ID_Planilla", "Comida_y_Cafeteria", "Cigarrillos"])
 
     st.sidebar.markdown("---")
-    st.sidebar.header("📋 Carga Rápida por Día / Turno")
+    st.sidebar.header("📋 Carga Rápida de Turno (Full)")
     
     dia_sel = st.sidebar.selectbox("Día del mes", list(range(1, 32)), key=f"dia_sel_{anio_full}_{mes_full}")
     turno_sel = st.sidebar.selectbox("Turno", ["Mañana", "Tarde"], key=f"turno_sel_{anio_full}_{mes_full}")
     id_planilla_default = f"{str(dia_sel).zfill(2)}-{mes_full.lower()}-15641"
-    id_planilla_ingresado = st.sidebar.text_input("ID / Nombre Planilla", value=id_planilla_default, key=f"id_planilla_{anio_full}_{mes_full}")
+    id_planilla_ingresado = st.sidebar.text_input("Nº Planilla", value=id_planilla_default, key=f"id_planilla_{anio_full}_{mes_full}")
     
-    st.sidebar.info("Copiá la tabla de tu archivo `.htm` y pegala acá abajo:")
+    st.sidebar.info("Copiá la tabla completa del turno (`.htm`) y pegala acá. Extraerá las cantidades de **Comida/Cafetería** (02-232, 02-241, 02-198 sumadas) y **Cigarrillos** (02-238).")
     texto_turno = st.sidebar.text_area("Pegar datos del turno (Ctrl + V)", height=120, key=f"txt_turno_{anio_full}_{mes_full}")
 
     if st.sidebar.button("💾 Guardar / Actualizar este Turno", key=f"btn_guardar_turno_{anio_full}_{mes_full}"):
         if texto_turno.strip():
             try:
                 df_nuevo = pd.read_csv(io.StringIO(texto_turno), sep=None, engine='python')
-                df_nuevo = procesar_turno_full(df_nuevo)
+                resultado_turno = procesar_turno_full(df_nuevo)
                 
-                # Transformar a formato plano (melt o filas por rubro)
-                col_rubro = df_nuevo.columns[0]
-                cols_vals = [c for c in df_nuevo.columns if c != col_rubro]
+                nueva_fila = {
+                    "Dia": dia_sel,
+                    "Turno": turno_sel,
+                    "ID_Planilla": id_planilla_ingresado,
+                    "Comida_y_Cafeteria": resultado_turno["Comida_y_Cafeteria"],
+                    "Cigarrillos": resultado_turno["Cigarrillos"]
+                }
                 
-                # Armar registros limpios
-                df_melted = pd.melt(df_nuevo, id_vars=[col_rubro], value_vars=cols_vals, var_name="Metrica", value_name="Valor")
-                df_melted.rename(columns={col_rubro: "Rubro"}, inplace=True)
-                df_melted["Dia"] = dia_sel
-                df_melted["Turno"] = turno_sel
-                df_melted["ID_Planilla"] = id_planilla_ingresado
-                
-                # Asegurar valores numéricos
-                df_melted["Valor"] = pd.to_numeric(df_melted["Valor"], errors='coerce').fillna(0)
-
-                # Actualizar session_state (remover datos previos de ese mismo día y turno si existían y agregar los nuevos)
                 df_actual = st.session_state[f"full_calendar_{anio_full}"][mes_full]
                 if not df_actual.empty:
-                    # Filtrar fuera el día y turno anterior para reemplazarlo
                     df_actual = df_actual[~((df_actual["Dia"] == dia_sel) & (df_actual["Turno"] == turno_sel))]
-                    df_combinado = pd.concat([df_actual, df_melted], ignore_index=True)
+                    df_combinado = pd.concat([df_actual, pd.DataFrame([nueva_fila])], ignore_index=True)
                 else:
-                    df_combinado = df_melted
+                    df_combinado = pd.DataFrame([nueva_fila])
+                
+                df_combinado = df_combinado.sort_values(by=["Dia", "Turno"]).reset_index(drop=True)
 
                 st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_combinado
-                
-                # Guardar automáticamente en la nube
                 guardar_en_nube(sheet_full_name, df_combinado)
-                st.sidebar.success(f"¡Turno {turno_sel} del Día {dia_sel} guardado con éxito!")
+                st.sidebar.success(f"¡Turno {turno_sel} Día {dia_sel} guardado! (Comida/Café: {formato_arg(resultado_turno['Comida_y_Cafeteria'], 2)} | Cigarrillos: {formato_arg(resultado_turno['Cigarrillos'], 2)})")
             except Exception as e:
                 st.sidebar.error(f"Error al procesar el turno: {e}")
         else:
@@ -312,34 +337,37 @@ elif menu_principal == "🛒 TIENDA FULL":
     df_mes = st.session_state[f"full_calendar_{anio_full}"].get(mes_full, pd.DataFrame())
 
     if not df_mes.empty:
-        st.markdown("### 📅 Resumen por Día y Turno")
-        # Crear una tabla pivote para mostrar el calendario de ventas de forma clara
-        try:
-            # Agrupar por Día y Turno sumando la métrica principal o total
-            df_resumen = df_mes.groupby(["Dia", "Turno", "ID_Planilla"], as_index=False)["Valor"].sum()
-            st.dataframe(df_resumen, use_container_width=True, hide_index=True)
-        except Exception as e:
-            st.dataframe(df_mes, use_container_width=True, hide_index=True)
+        st.markdown(f"### 📅 Detalle Diario por Turno - {anio_full}")
+        df_mostrar = df_mes.rename(columns={
+            "Dia": "Día",
+            "ID_Planilla": "Nº Planilla",
+            "Comida_y_Cafeteria": "Comida y Cafetería (Unid.)",
+            "Cigarrillos": "Cigarrillos (Unid.)"
+        })
+        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay turnos cargados para {mes_full} {anio_full}. Utilizá la barra lateral para cargar los turnos Día por Día.")
+        st.info(f"No hay turnos cargados para {mes_full} {anio_full}. Utilizá la barra lateral para pegar los turnos.")
 
-    # Comparativa rápida 2026 vs 2025 en la misma vista de Full
+    # Comparativa 2026 vs 2025
     st.markdown("---")
-    st.subheader(f"📊 Comparativa Mensual Full: 2026 vs 2025 ({mes_full})")
+    st.subheader(f"📊 Comparativa Mensual Full (Cantidades): 2026 vs 2025 ({mes_full})")
     
     df_26 = st.session_state["full_calendar_2026"].get(mes_full, pd.DataFrame())
     df_25 = st.session_state["full_calendar_2025"].get(mes_full, pd.DataFrame())
     
-    tot_26 = df_26["Valor"].sum() if not df_26.empty and "Valor" in df_26.columns else 0
-    tot_25 = df_25["Valor"].sum() if not df_25.empty and "Valor" in df_25.columns else 0
-    
-    diff_full = ((tot_26 - tot_25) / tot_25 * 100) if tot_25 > 0 else 0
-    
+    comida_26 = df_26["Comida_y_Cafeteria"].sum() if not df_26.empty and "Comida_y_Cafeteria" in df_26.columns else 0
+    comida_25 = df_25["Comida_y_Cafeteria"].sum() if not df_25.empty and "Comida_y_Cafeteria" in df_25.columns else 0
+    diff_comida = ((comida_26 - comida_25) / comida_25 * 100) if comida_25 > 0 else 0
+
+    cigar_26 = df_26["Cigarrillos"].sum() if not df_26.empty and "Cigarrillos" in df_26.columns else 0
+    cigar_25 = df_25["Cigarrillos"].sum() if not df_25.empty and "Cigarrillos" in df_25.columns else 0
+    diff_cigar = ((cigar_26 - cigar_25) / cigar_25 * 100) if cigar_25 > 0 else 0
+
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        st.metric(f"🛒 Total Full 2026 ({mes_full})", f"$ {formato_arg(tot_26, 2)}")
+        st.metric(f"☕ Comida y Cafetería (Unid.)", f"{formato_arg(comida_26, 2)} unid.", delta=f"{diff_comida:+.2f}% vs 2025 ({formato_arg(comida_25, 2)})")
     with col_f2:
-        st.metric(f"🛒 Total Full 2025 ({mes_full})", f"$ {formato_arg(tot_25, 2)}", delta=f"{diff_full:+.2f}% vs 2025")
+        st.metric(f"🚬 Cigarrillos (Unid.)", f"{formato_arg(cigar_26, 2)} unid.", delta=f"{diff_cigar:+.2f}% vs 2025 ({formato_arg(cigar_25, 2)})")
 
 # ==========================================
 # 4. BOXES
