@@ -44,6 +44,44 @@ def limpiar_columnas(df):
     df.columns = cols_limpias
     return df
 
+# Función para leer archivos subidos (soporta CSV, Excel y HTM/HTML de YPF)
+def leer_archivo_universal(uploaded_file):
+    if uploaded_file is None:
+        return pd.DataFrame()
+    nombre = uploaded_file.name.lower()
+    try:
+        if nombre.endswith('.csv'):
+            return pd.read_csv(uploaded_file)
+        elif nombre.endswith(('.xls', '.xlsx')):
+            return pd.read_excel(uploaded_file)
+        elif nombre.endswith(('.htm', '.html')):
+            dfs = pd.read_html(uploaded_file)
+            if dfs:
+                return dfs[0]
+    except Exception:
+        pass
+    
+    # Intentos genéricos si falla la extensión
+    uploaded_file.seek(0)
+    try:
+        return pd.read_excel(uploaded_file)
+    except:
+        pass
+    
+    uploaded_file.seek(0)
+    try:
+        dfs = pd.read_html(uploaded_file)
+        if dfs:
+            return dfs[0]
+    except:
+        pass
+
+    uploaded_file.seek(0)
+    try:
+        return pd.read_csv(uploaded_file)
+    except:
+        return pd.DataFrame()
+
 # Función inteligente para extraer las cantidades exactas según las reglas solicitadas
 def procesar_turno_full(df):
     if df.empty:
@@ -182,7 +220,7 @@ if menu_principal == "📊 DASHBOARD":
     st.info("Panel de control centralizado de la estación con comparativa interanual.")
 
 # ==========================================
-# 2. COMBUSTIBLES (INTACTO)
+# 2. COMBUSTIBLES
 # ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
@@ -273,7 +311,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
 
 # ==========================================
-# 3. TIENDA FULL (CALENDARIO POR DÍA Y TURNO - CANTIDADES)
+# 3. TIENDA FULL (CALENDARIO POR DÍA Y TURNO - CARGA DE ARCHIVO)
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
@@ -291,20 +329,23 @@ elif menu_principal == "🛒 TIENDA FULL":
             st.session_state[f"full_calendar_{anio_full}"][mes_full] = pd.DataFrame(columns=["Dia", "Turno", "ID_Planilla", "Bebidas_Calientes", "Comida_Elaborada_y_Envasada", "Cigarrillos"])
 
     st.sidebar.markdown("---")
-    st.sidebar.header("📋 Carga Rápida de Turno (Full)")
+    st.sidebar.header("📥 Subir Archivo de Turno (Full)")
     
     dia_sel = st.sidebar.selectbox("Día del mes", list(range(1, 32)), key=f"dia_sel_{anio_full}_{mes_full}")
     turno_sel = st.sidebar.selectbox("Turno", ["Mañana", "Tarde"], key=f"turno_sel_{anio_full}_{mes_full}")
     id_planilla_default = f"{str(dia_sel).zfill(2)}-{mes_full.lower()}-15641"
     id_planilla_ingresado = st.sidebar.text_input("Nº Planilla", value=id_planilla_default, key=f"id_planilla_{anio_full}_{mes_full}")
     
-    st.sidebar.info("Copiá la tabla completa del turno y pegala acá. Extraerá:\n- **Bebidas Calientes** (02-232)\n- **Comida Elaborada y Envasada** (02-241 + 02-198 sumadas)\n- **Cigarrillos** (02-238)")
-    texto_turno = st.sidebar.text_area("Pegar datos del turno (Ctrl + V)", height=120, key=f"txt_turno_{anio_full}_{mes_full}")
+    archivo_turno = st.sidebar.file_uploader(
+        f"Subir reporte del turno (.htm, Excel, CSV)", 
+        type=["csv", "xlsx", "xls", "htm", "html"], 
+        key=f"uploader_full_archivo_{anio_full}_{mes_full}"
+    )
 
-    if st.sidebar.button("💾 Guardar / Actualizar este Turno", key=f"btn_guardar_turno_{anio_full}_{mes_full}"):
-        if texto_turno.strip():
+    if st.sidebar.button("💾 Procesar y Guardar este Turno", key=f"btn_guardar_turno_{anio_full}_{mes_full}"):
+        if archivo_turno is not None:
             try:
-                df_nuevo = pd.read_csv(io.StringIO(texto_turno), sep=None, engine='python')
+                df_nuevo = leer_archivo_universal(archivo_turno)
                 resultado_turno = procesar_turno_full(df_nuevo)
                 
                 nueva_fila = {
@@ -327,11 +368,11 @@ elif menu_principal == "🛒 TIENDA FULL":
 
                 st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_combinado
                 guardar_en_nube(sheet_full_name, df_combinado)
-                st.sidebar.success(f"¡Turno guardado con éxito!")
+                st.sidebar.success(f"¡Turno Día {dia_sel} ({turno_sel}) procesado y guardado!")
             except Exception as e:
-                st.sidebar.error(f"Error al procesar el turno: {e}")
+                st.sidebar.error(f"Error al procesar el archivo: {e}")
         else:
-            st.sidebar.warning("El cuadro de texto está vacío.")
+            st.sidebar.warning("Por favor, subí un archivo antes de guardar.")
 
     if st.sidebar.button("🔄 Recargar desde la Nube", key=f"btn_recargar_full_{anio_full}_{mes_full}"):
         st.cache_data.clear()
@@ -357,7 +398,7 @@ elif menu_principal == "🛒 TIENDA FULL":
         })
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay turnos cargados para {mes_full} {anio_full}. Utilizá la barra lateral para pegar los turnos.")
+        st.info(f"No hay turnos cargados para {mes_full} {anio_full}. Utilizá la barra lateral para subir los archivos de cada turno.")
 
     # Comparativa 2026 vs 2025
     st.markdown("---")
