@@ -140,14 +140,79 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         vol_2025 = df_2025[c_vol_25].sum()
         desp_2025 = len(df_2025)
 
-    # Métricas comparativas lado a lado (sin ventas totales en pesos)
+    # Métricas comparativas lado a lado (Volumen sin decimales/coma, sin ventas totales)
     col1, col2 = st.columns(2)
     with col1:
         diff_vol = ((vol_2026 - vol_2025) / vol_2025 * 100) if vol_2025 > 0 else 0
-        st.metric("📦 Volumen Total (L) 2026", f"{formato_arg(vol_2026, 2)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_2025, 2)} L)")
+        st.metric("📦 Volumen Total (L) 2026", f"{formato_arg(vol_2026, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_2025, 0)} L)")
     with col2:
         diff_desp = ((desp_2026 - desp_2025) / desp_2025 * 100) if desp_2025 > 0 else 0
         st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
+
+    st.markdown("---")
+
+    # Función auxiliar para calcular mix
+    def calcular_mix_datos(df):
+        if df.empty:
+            return 0, 0, 0, 0, 0, 0
+        c_prod = "Producto" if "Producto" in df.columns else df.columns[2]
+        c_vol = "Volumen" if "Volumen" in df.columns else df.columns[3]
+        df_temp = df.copy()
+        df_temp['prod_lower'] = df_temp[c_prod].astype(str).str.lower()
+        
+        vs = df_temp[df_temp['prod_lower'].str.contains('super|ns xxi', case=False, na=False)][c_vol].sum()
+        vin = df_temp[df_temp['prod_lower'].str.contains('infinia', case=False, na=False) & ~df_temp['prod_lower'].str.contains('diesel', case=False, na=False)][c_vol].sum()
+        tot_naf = vs + vin
+
+        vd500 = df_temp[df_temp['prod_lower'].str.contains('500|d500|diesel 500', case=False, na=False)][c_vol].sum()
+        vind = df_temp[df_temp['prod_lower'].str.contains('infinia diesel|diesel infinia|go', case=False, na=False)][c_vol].sum()
+        tot_die = vd500 + vind
+        return vs, vin, tot_naf, vd500, vind, tot_die
+
+    vs_26, vin_26, tot_naf_26, vd500_26, vind_26, tot_die_26 = calcular_mix_datos(df_2026)
+    vs_25, vin_25, tot_naf_25, vd500_25, vind_25, tot_die_25 = calcular_mix_datos(df_2025)
+
+    # Mix de Combustibles por debajo (VS 2025)
+    st.markdown("### 📊 Mix de Ventas por Producto (VS 2026 vs 2025)")
+    col_mix1, col_mix2 = st.columns(2)
+
+    with col_mix1:
+        st.markdown("#### 🟢 Mix Naftas (Super / NS XXI vs Infinia)")
+        if tot_naf_26 > 0 or tot_naf_25 > 0:
+            pct_s_26 = (vs_26 / tot_naf_26 * 100) if tot_naf_26 > 0 else 0
+            pct_i_26 = (vin_26 / tot_naf_26 * 100) if tot_naf_26 > 0 else 0
+            pct_s_25 = (vs_25 / tot_naf_25 * 100) if tot_naf_25 > 0 else 0
+            pct_i_25 = (vin_25 / tot_naf_25 * 100) if tot_naf_25 > 0 else 0
+
+            df_mix_naftas_comp = pd.DataFrame({
+                "Producto": ["Super / NS XXI", "Infinia"],
+                "Volumen 2026 (L)": [f"{formato_arg(vs_26, 2)} L", f"{formato_arg(vin_26, 2)} L"],
+                "Mix 2026 (%)": [f"{pct_s_26:.2f}%", f"{pct_i_26:.2f}%"],
+                "Volumen 2025 (L)": [f"{formato_arg(vs_25, 2)} L", f"{formato_arg(vin_25, 2)} L"],
+                "Mix 2025 (%)": [f"{pct_s_25:.2f}%", f"{pct_i_25:.2f}%"]
+            })
+            st.dataframe(df_mix_naftas_comp, use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin datos suficientes para mix de naftas.")
+
+    with col_mix2:
+        st.markdown("#### 🛢️ Mix Diésel (GO - Infinia Diesel vs D. Diesel 500)")
+        if tot_die_26 > 0 or tot_die_25 > 0:
+            pct_d_26 = (vd500_26 / tot_die_26 * 100) if tot_die_26 > 0 else 0
+            pct_id_26 = (vind_26 / tot_die_26 * 100) if tot_die_26 > 0 else 0
+            pct_d_25 = (vd500_25 / tot_die_25 * 100) if tot_die_25 > 0 else 0
+            pct_id_25 = (vind_25 / tot_die_25 * 100) if tot_die_25 > 0 else 0
+
+            df_mix_diesel_comp = pd.DataFrame({
+                "Producto": ["D. Diesel 500", "GO - Infinia Diesel"],
+                "Volumen 2026 (L)": [f"{formato_arg(vd500_26, 2)} L", f"{formato_arg(vind_26, 2)} L"],
+                "Mix 2026 (%)": [f"{pct_d_26:.2f}%", f"{pct_id_26:.2f}%"],
+                "Volumen 2025 (L)": [f"{formato_arg(vd500_25, 2)} L", f"{formato_arg(vind_25, 2)} L"],
+                "Mix 2025 (%)": [f"{pct_d_25:.2f}%", f"{pct_id_25:.2f}%"]
+            })
+            st.dataframe(df_mix_diesel_comp, use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin datos suficientes para mix de diésel.")
 
     st.markdown("---")
 
