@@ -172,8 +172,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     vs_26, vin_26, tot_naf_26, vd500_26, vind_26, tot_die_26 = calcular_mix_datos(df_2026)
     vs_25, vin_25, tot_naf_25, vd500_25, vind_25, tot_die_25 = calcular_mix_datos(df_2025)
 
-    # Mix de Combustibles por debajo (VS 2025)
-    st.markdown("### 📊 Mix de Ventas por Producto (VS 2026 vs 2025)")
+    # Mix de Combustibles por debajo (sin VS redundante en el título)
+    st.markdown("### 📊 Mix de Ventas por Producto")
     col_mix1, col_mix2 = st.columns(2)
 
     with col_mix1:
@@ -187,8 +187,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             df_mix_naftas_comp = pd.DataFrame({
                 "Producto": ["Super / NS XXI", "Infinia"],
                 "Volumen 2026 (L)": [f"{formato_arg(vs_26, 2)} L", f"{formato_arg(vin_26, 2)} L"],
-                "Mix 2026 (%)": [f"{pct_s_26:.2f}%", f"{pct_i_26:.2f}%"],
                 "Volumen 2025 (L)": [f"{formato_arg(vs_25, 2)} L", f"{formato_arg(vin_25, 2)} L"],
+                "Mix 2026 (%)": [f"{pct_s_26:.2f}%", f"{pct_i_26:.2f}%"],
                 "Mix 2025 (%)": [f"{pct_s_25:.2f}%", f"{pct_i_25:.2f}%"]
             })
             st.dataframe(df_mix_naftas_comp, use_container_width=True, hide_index=True)
@@ -206,8 +206,8 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             df_mix_diesel_comp = pd.DataFrame({
                 "Producto": ["D. Diesel 500", "GO - Infinia Diesel"],
                 "Volumen 2026 (L)": [f"{formato_arg(vd500_26, 2)} L", f"{formato_arg(vind_26, 2)} L"],
-                "Mix 2026 (%)": [f"{pct_d_26:.2f}%", f"{pct_id_26:.2f}%"],
                 "Volumen 2025 (L)": [f"{formato_arg(vd500_25, 2)} L", f"{formato_arg(vind_25, 2)} L"],
+                "Mix 2026 (%)": [f"{pct_d_26:.2f}%", f"{pct_id_26:.2f}%"],
                 "Mix 2025 (%)": [f"{pct_d_25:.2f}%", f"{pct_id_25:.2f}%"]
             })
             st.dataframe(df_mix_diesel_comp, use_container_width=True, hide_index=True)
