@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import json
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Gestión Estación YPF (Modo Lectura Nube)", layout="wide")
@@ -22,7 +23,7 @@ meses_lista = [
 # URL de Google Apps Script conectada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxUWd3i5utU7OeQcT462lTRi91aPRLBAH9E6lulLuV2W1FPn68wMaMfkS8RjdTnXPUd/exec"
 
-# Función robusta con caché corto para actualización instantánea desde la nube
+# Función robusta con caché corto para lectura desde la nube
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desde_nube(sheet_name):
     try:
@@ -42,6 +43,23 @@ def cargar_desde_nube(sheet_name):
     except Exception as e:
         st.warning(f"No se pudo conectar con la nube: {e}")
     return pd.DataFrame()
+
+# Función para enviar datos a Google Sheets (guardar en la nube)
+def guardar_en_nube(sheet_name, df):
+    try:
+        if URL_NUBE and not df.empty:
+            # Convertir DataFrame a formato JSON compatible con el script
+            records = df.to_dict(orient="records")
+            payload = {
+                "sheet": sheet_name,
+                "data": records
+            }
+            res = requests.post(URL_NUBE, json=payload, timeout=20)
+            if res.status_code == 200:
+                return True
+    except Exception as e:
+        st.error(f"Error al guardar en la nube: {e}")
+    return False
 
 # Formateador de números estilo argentino (ej: 2.154 o 1.254.300)
 def formato_arg(val, decimales=0):
@@ -72,27 +90,41 @@ if menu_principal == "📊 DASHBOARD":
 # ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes")
+    st.sidebar.header("📂 Seleccionar Mes y Año")
     mes_seleccionado_comb = st.sidebar.selectbox("Mes Combustibles", meses_lista)
 
-    # Opción de carga manual de archivo para 2026
+    # Opción de carga manual con selector explícito de año para evitar confusiones
     st.sidebar.markdown("---")
-    st.sidebar.header("📥 Carga Manual de Archivo (2026)")
-    archivo_subido = st.sidebar.file_uploader(f"Subir Excel/CSV 2026 - {mes_seleccionado_comb}", type=["csv", "xlsx", "xls"], key=f"uploader_comb_2026_{mes_seleccionado_comb}")
+    st.sidebar.header("📥 Carga Manual de Archivo")
+    anio_subida = st.sidebar.selectbox("Año destino del archivo", [2026, 2025], index=0)
+    archivo_subido = st.sidebar.file_uploader(f"Subir Excel/CSV - {mes_seleccionado_comb} ({anio_subida})", type=["csv", "xlsx", "xls"], key=f"uploader_comb_{anio_subida}_{mes_seleccionado_comb}")
+    
+    sheet_comb_2026 = f"combustibles_{mes_seleccionado_comb.lower()}_2026"
+    sheet_comb_2025 = f"combustibles_{mes_seleccionado_comb.lower()}_2025"
+    sheet_activa = sheet_comb_2026 if anio_subida == 2026 else sheet_comb_2025
+
     if archivo_subido is not None:
         try:
             if archivo_subido.name.endswith('.csv'):
                 df_subido = pd.read_csv(archivo_subido)
             else:
                 df_subido = pd.read_excel(archivo_subido)
+            
             if not df_subido.empty:
-                st.session_state["combustibles_2026"][mes_seleccionado_comb] = df_subido
-                st.sidebar.success("¡Archivo 2026 cargado con éxito!")
+                st.session_state[f"combustibles_{anio_subida}"][mes_seleccionado_comb] = df_subido
+                st.sidebar.success(f"¡Archivo leído correctamente para {anio_subida}!")
+                
+                # Botón explícito para sincronizar y guardar de forma permanente en Google Sheets
+                if st.sidebar.button("💾 Guardar permanentemente en la Nube", key=f"btn_guardar_{anio_subida}_{mes_seleccionado_comb}"):
+                    with st.spinner("Guardando en Google Sheets..."):
+                        exito = guardar_en_nube(sheet_activa, df_subido)
+                        if exito:
+                            st.sidebar.success("¡Guardado en la nube con éxito!")
+                            st.cache_data.clear()
+                        else:
+                            st.sidebar.error("No se pudo guardar en la nube. Verifique el Apps Script.")
         except Exception as e:
             st.sidebar.error(f"Error al leer el archivo: {e}")
-
-    sheet_comb_2026 = f"combustibles_{mes_seleccionado_comb.lower()}_2026"
-    sheet_comb_2025 = f"combustibles_{mes_seleccionado_comb.lower()}_2025"
 
     # Carga automática desde la nube si no está en memoria
     if mes_seleccionado_comb not in st.session_state["combustibles_2026"] or st.session_state["combustibles_2026"][mes_seleccionado_comb].empty:
@@ -114,7 +146,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     df_2026 = st.session_state["combustibles_2026"].get(mes_seleccionado_comb, pd.DataFrame())
     df_2025 = st.session_state["combustibles_2025"].get(mes_seleccionado_comb, pd.DataFrame())
 
-    st.subheader(f"⛽ COMBUSTIBLES - {mes_seleccionado_comb} (VS 2026 vs 2025)")
+    st.subheader(f"⛽ COMBUSTIBLES - {mes_seleccionado_comb} (2026 vs 2025)")
 
     # Procesar datos 2026
     vol_2026, desp_2026 = 0, 0
@@ -140,7 +172,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         vol_2025 = df_2025[c_vol_25].sum()
         desp_2025 = len(df_2025)
 
-    # Métricas comparativas lado a lado (Volumen sin decimales/coma, sin ventas totales)
+    # Métricas comparativas lado a lado
     col1, col2 = st.columns(2)
     with col1:
         diff_vol = ((vol_2026 - vol_2025) / vol_2025 * 100) if vol_2025 > 0 else 0
@@ -172,7 +204,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     vs_26, vin_26, tot_naf_26, vd500_26, vind_26, tot_die_26 = calcular_mix_datos(df_2026)
     vs_25, vin_25, tot_naf_25, vd500_25, vind_25, tot_die_25 = calcular_mix_datos(df_2025)
 
-    # Mix de Combustibles por debajo (sin VS redundante en el título)
+    # Mix de Combustibles por debajo
     st.markdown("### 📊 Mix de Ventas por Producto")
     col_mix1, col_mix2 = st.columns(2)
 
@@ -261,7 +293,7 @@ elif menu_principal == "🛒 TIENDA FULL":
         st.session_state["full_2025"].pop(mes_seleccionado_full, None)
         st.rerun()
 
-    st.title(f"🛒 Tienda Full - {mes_seleccionado_full} (VS 2026 vs 2025)")
+    st.title(f"🛒 Tienda Full - {mes_seleccionado_full} (2026 vs 2025)")
     df_rubros_26 = st.session_state["full_2026"].get(mes_seleccionado_full, pd.DataFrame())
     df_rubros_25 = st.session_state["full_2025"].get(mes_seleccionado_full, pd.DataFrame())
 
@@ -307,7 +339,7 @@ elif menu_principal == "📦 BOXES":
     df_b_26 = st.session_state["boxes_2026"].get(mes_seleccionado_boxes, pd.DataFrame())
     df_b_25 = st.session_state["boxes_2025"].get(mes_seleccionado_boxes, pd.DataFrame())
 
-    st.subheader(f"📦 BOXES - {mes_seleccionado_boxes} (VS 2026 vs 2025)")
+    st.subheader(f"📦 BOXES - {mes_seleccionado_boxes} (2026 vs 2025)")
 
     st.markdown(f"### 📋 Boxes - 2026")
     if not df_b_26.empty:
