@@ -44,14 +44,17 @@ def cargar_desde_nube(sheet_name):
         st.warning(f"No se pudo conectar con la nube: {e}")
     return pd.DataFrame()
 
-# Función para enviar datos a Google Sheets (con conversión automática para evitar errores de Timestamp)
+# Función para enviar datos a Google Sheets (con limpieza total de NaN y Timestamps)
 def guardar_en_nube(sheet_name, df):
     try:
         if URL_NUBE and not df.empty:
             df_limpio = df.copy()
-            # Limpiamos tipos Timestamp / fechas para que el JSON los acepte sin romper
+            # Reemplaza cualquier NaN, NaT o valor nulo por un string vacío de forma segura
+            df_limpio = df_limpio.astype(object).where(pd.notnull(df_limpio), "")
+            
+            # Aseguramos que todo quede como texto limpio para evitar errores de JSON / NaN
             for col in df_limpio.columns:
-                df_limpio[col] = df_limpio[col].astype(str).replace('NaT', '').replace('nan', '')
+                df_limpio[col] = df_limpio[col].apply(lambda x: str(x) if x != "" else "")
 
             records = df_limpio.to_dict(orient="records")
             payload = {
