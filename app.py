@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
+import re
 from bs4 import BeautifulSoup
 import io
 
@@ -61,7 +62,6 @@ def leer_archivo_universal(uploaded_file):
     except Exception:
         pass
     
-    # Intentos genéricos si falla la extensión
     uploaded_file.seek(0)
     try:
         return pd.read_excel(uploaded_file)
@@ -82,7 +82,7 @@ def leer_archivo_universal(uploaded_file):
     except:
         return pd.DataFrame()
 
-# Función inteligente para extraer las cantidades exactas según las reglas solicitadas
+# Función inteligente mejorada: extrae solo la cantidad de unidades y descarta precios/totales
 def procesar_turno_full(df):
     if df.empty:
         return {
@@ -93,57 +93,49 @@ def procesar_turno_full(df):
     
     df = limpiar_columnas(df)
     
-    # Encontrar la columna de descripción / rubro
-    col_desc = df.columns[0]
-    for col in df.columns:
-        c_low = str(col).lower()
-        if any(k in c_low for k in ['rubro', 'descripcion', 'concepto', 'producto', 'item', 'detalle']):
-            col_desc = col
-            break
-            
-    # Encontrar la columna de cantidad (Unidades)
-    col_cant = None
-    for col in df.columns:
-        if col == col_desc:
+    val_bebidas = 0.0
+    val_comida = 0.0
+    val_cigarros = 0.0
+    
+    for idx, row in df.iterrows():
+        # Unir todo el texto de la fila para detectar el código o concepto sin importar la columna
+        texto_fila = " ".join([str(val) for val in row.values]).lower()
+        
+        es_bebida = bool(re.search(r'02-232|bebidas?\s*caliente', texto_fila))
+        es_comida = bool(re.search(r'02-241|02-198|comida\s*elaborad|comidas?\s*envasad', texto_fila))
+        es_cigarro = bool(re.search(r'02-238|cigarrillo', texto_fila))
+        
+        if not (es_bebida or es_comida or es_cigarro):
             continue
-        c_low = str(col).lower()
-        if any(k in c_low for k in ['cantidad', 'unidades', 'cant', 'qty', 'cnt']):
-            col_cant = col
-            break
             
-    if not col_cant:
+        # Buscar estrictamente la PRIMERA columna numérica de la fila (Cantidad de Unidades)
+        # Esto descarta automáticamente los montos altos de dinero (como 54300,00 de totales)
+        cantidad_encontrada = 0.0
         for col in df.columns:
-            if col == col_desc:
+            val_str = str(row[col]).strip()
+            val_limpio = val_str.replace('$', '').replace(' ', '')
+            if ',' in val_limpio and '.' in val_limpio:
+                val_limpio = val_limpio.replace('.', '').replace(',', '.')
+            elif ',' in val_limpio:
+                val_limpio = val_limpio.replace(',', '.')
+            
+            try:
+                num = float(val_limpio)
+                # Filtro lógico: las unidades en un turno son números menores a 10000 
+                # (evita agarrar precios totales altos o códigos extraños)
+                if 0 <= num < 10000:
+                    cantidad_encontrada = num
+                    break # Encontramos la cantidad exacta, detenemos la búsqueda en esta fila
+            except:
                 continue
-            temp_num = pd.to_numeric(df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
-            if temp_num.notna().sum() > 0:
-                col_cant = col
-                break
                 
-    if not col_cant:
-        col_cant = df.columns[1] if len(df.columns) > 1 else df.columns[0]
-
-    # Limpiar y convertir a numérico la columna de cantidad
-    serie_cant = df[col_cant].astype(str).str.strip()
-    serie_cant = serie_cant.str.replace('$', '', regex=False).str.replace(' ', '', regex=False)
-    serie_cant = serie_cant.apply(lambda x: x.replace('.', '').replace(',', '.') if (',' in x and '.' in x) or (x.count('.') > 1) or (',' in x and x.find(',') > x.find('.')) else x.replace(',', '.'))
-    df["_cant_num"] = pd.to_numeric(serie_cant, errors='coerce').fillna(0)
-    
-    # Normalizar descripción para buscar los códigos exactos
-    df["_desc_str"] = df[col_desc].astype(str).str.lower()
-    
-    # 1. Bebidas Calientes: 02-232
-    mask_bebidas = df["_desc_str"].str.contains('02-232|bebidas caliente', regex=True, na=False)
-    val_bebidas = df[mask_bebidas]["_cant_num"].sum()
-    
-    # 2. Comida Elaborada (02-241) y Comida Envasada (02-198) sumadas juntas
-    mask_comida = df["_desc_str"].str.contains('02-241|02-198|comida elaborad|comidas envasad', regex=True, na=False)
-    val_comida = df[mask_comida]["_cant_num"].sum()
-    
-    # 3. Cigarrillos: 02-238
-    mask_cigarros = df["_desc_str"].str.contains('02-238|cigarrillos', regex=True, na=False)
-    val_cigarros = df[mask_cigarros]["_cant_num"].sum()
-    
+        if es_bebida:
+            val_bebidas += cantidad_encontrada
+        elif es_comida:
+            val_comida += cantidad_encontrada
+        elif es_cigarro:
+            val_cigarros += cantidad_encontrada
+            
     return {
         "Bebidas_Calientes": val_bebidas,
         "Comida_Elaborada_y_Envasada": val_comida,
