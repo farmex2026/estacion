@@ -25,6 +25,25 @@ meses_lista = [
 # URL de Google Apps Script actualizada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxKBg59r94ZC8hK4VmrmN3SWx6rg1lIvfcAiLf4KxFYzDcUut54KBPPvO9sRf6akwUQ/exec"
 
+# Función para limpiar y evitar nombres de columnas duplicados (vital para Arrow/Streamlit)
+def limpiar_columnas(df):
+    if df.empty:
+        return df
+    cols_limpias = []
+    conteo = {}
+    for c in df.columns:
+        c_str = str(c).strip()
+        if not c_str or c_str.lower() == "nan" or c_str == "None":
+            c_str = "Columna"
+        if c_str in conteo:
+            conteo[c_str] += 1
+            cols_limpias.append(f"{c_str}_{conteo[c_str]}")
+        else:
+            conteo[c_str] = 0
+            cols_limpias.append(c_str)
+    df.columns = cols_limpias
+    return df
+
 # Función robusta con caché corto para lectura desde la nube
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desde_nube(sheet_name):
@@ -37,11 +56,14 @@ def cargar_desde_nube(sheet_name):
                     rows = data.get("rows", data.get("data", []))
                     headers = data.get("headers", data.get("columns", []))
                     if rows and headers:
-                        return pd.DataFrame(rows, columns=headers)
+                        df = pd.DataFrame(rows, columns=headers)
+                        return limpiar_columnas(df)
                     elif rows and not headers:
-                        return pd.DataFrame(rows)
+                        df = pd.DataFrame(rows)
+                        return limpiar_columnas(df)
                 elif isinstance(data, list) and len(data) > 0:
-                    return pd.DataFrame(data)
+                    df = pd.DataFrame(data)
+                    return limpiar_columnas(df)
     except Exception as e:
         st.warning(f"No se pudo conectar con la nube: {e}")
     return pd.DataFrame()
@@ -68,7 +90,7 @@ def guardar_en_nube(sheet_name, df):
         st.error(f"Error al guardar en la nube: {e}")
     return False
 
-# Lector robusto de tablas .HTM sin dependencias externas (usa BeautifulSoup nativo)
+# Lector robusto de tablas .HTM sin dependencias externas
 def leer_tabla_htm_directo(archivo):
     try:
         contenido = archivo.getvalue().decode("utf-8", errors="ignore")
@@ -88,7 +110,8 @@ def leer_tabla_htm_directo(archivo):
             
         max_len = max(len(r) for r in rows)
         rows_padded = [r + [""] * (max_len - len(r)) for r in rows]
-        return pd.DataFrame(rows_padded[1:], columns=rows_padded[0])
+        df = pd.DataFrame(rows_padded[1:], columns=rows_padded[0])
+        return limpiar_columnas(df)
     except Exception as e:
         st.error(f"Error al procesar el archivo HTML: {e}")
         return pd.DataFrame()
@@ -141,6 +164,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             else:
                 df_subido = pd.read_excel(archivo_subido)
             
+            df_subido = limpiar_columnas(df_subido)
             if not df_subido.empty:
                 st.session_state[f"combustibles_{anio_subida}"][mes_seleccionado_comb] = df_subido
                 st.sidebar.success(f"¡Archivo leído correctamente para {anio_subida}!")
@@ -182,7 +206,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         if len(df_2026) > 0 and any("fecha" in str(v).lower() for v in df_2026.iloc[0].values):
             df_2026.columns = df_2026.iloc[0].astype(str).str.strip()
             df_2026 = df_2026.iloc[1:].reset_index(drop=True)
-        df_2026.columns = [str(c).strip() for c in df_2026.columns]
+        df_2026 = limpiar_columnas(df_2026)
         c_vol_26 = "Volumen" if "Volumen" in df_2026.columns else df_2026.columns[3]
         df_2026[c_vol_26] = pd.to_numeric(df_2026[c_vol_26], errors='coerce').fillna(0)
         vol_2026 = df_2026[c_vol_26].sum()
@@ -193,7 +217,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         if len(df_2025) > 0 and any("fecha" in str(v).lower() for v in df_2025.iloc[0].values):
             df_2025.columns = df_2025.iloc[0].astype(str).str.strip()
             df_2025 = df_2025.iloc[1:].reset_index(drop=True)
-        df_2025.columns = [str(c).strip() for c in df_2025.columns]
+        df_2025 = limpiar_columnas(df_2025)
         c_vol_25 = "Volumen" if "Volumen" in df_2025.columns else df_2025.columns[3]
         df_2025[c_vol_25] = pd.to_numeric(df_2025[c_vol_25], errors='coerce').fillna(0)
         vol_2025 = df_2025[c_vol_25].sum()
@@ -289,7 +313,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             st.info(f"No hay registros en la nube para Combustibles 2025 - {mes_seleccionado_comb}.")
 
 # ==========================================
-# 3. TIENDA FULL (ACTUALIZADO CON PARSER DIRECTO)
+# 3. TIENDA FULL
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
@@ -327,6 +351,9 @@ elif menu_principal == "🛒 TIENDA FULL":
                 if df_actual.empty:
                     st.session_state[key_state][mes_seleccionado_full] = df_subido
                 else:
+                    # Alineamos columnas y concatenamos de manera segura
+                    df_actual = limpiar_columnas(df_actual)
+                    df_subido = limpiar_columnas(df_subido)
                     st.session_state[key_state][mes_seleccionado_full] = pd.concat([df_actual, df_subido], ignore_index=True)
                 
                 st.sidebar.success(f"¡Archivo {archivo_subido.name} ({turno_subida}) procesado!")
@@ -359,8 +386,8 @@ elif menu_principal == "🛒 TIENDA FULL":
         st.rerun()
 
     st.title(f"🛒 Tienda Full - {mes_seleccionado_full} (2026 vs 2025)")
-    df_rubros_26 = st.session_state["full_2026"].get(mes_seleccionado_full, pd.DataFrame())
-    df_rubros_25 = st.session_state["full_2025"].get(mes_seleccionado_full, pd.DataFrame())
+    df_rubros_26 = limpiar_columnas(st.session_state["full_2026"].get(mes_seleccionado_full, pd.DataFrame()))
+    df_rubros_25 = limpiar_columnas(st.session_state["full_2025"].get(mes_seleccionado_full, pd.DataFrame()))
 
     st.markdown(f"### 📋 Tienda Full - 2026")
     if not df_rubros_26.empty:
@@ -401,8 +428,8 @@ elif menu_principal == "📦 BOXES":
         st.session_state["boxes_2025"].pop(mes_seleccionado_boxes, None)
         st.rerun()
 
-    df_b_26 = st.session_state["boxes_2026"].get(mes_seleccionado_boxes, pd.DataFrame())
-    df_b_25 = st.session_state["boxes_2025"].get(mes_seleccionado_boxes, pd.DataFrame())
+    df_b_26 = limpiar_columnas(st.session_state["boxes_2026"].get(mes_seleccionado_boxes, pd.DataFrame()))
+    df_b_25 = limpiar_columnas(st.session_state["boxes_2025"].get(mes_seleccionado_boxes, pd.DataFrame()))
 
     st.subheader(f"📦 BOXES - {mes_seleccionado_boxes} (2026 vs 2025)")
 
