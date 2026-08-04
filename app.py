@@ -25,7 +25,7 @@ meses_lista = [
 # URL de Google Apps Script actualizada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxKBg59r94ZC8hK4VmrmN3SWx6rg1lIvfcAiLf4KxFYzDcUut54KBPPvO9sRf6akwUQ/exec"
 
-# Función para limpiar y evitar nombres de columnas duplicados (vital para Arrow/Streamlit)
+# Función para limpiar y evitar nombres de columnas duplicados
 def limpiar_columnas(df):
     if df.empty:
         return df
@@ -42,6 +42,41 @@ def limpiar_columnas(df):
             conteo[c_str] = 0
             cols_limpias.append(c_str)
     df.columns = cols_limpias
+    return df
+
+# Función para procesar, limpiar números (formato argentino) y sumar por rubro
+def procesar_y_sumar_rubros(df):
+    if df.empty:
+        return df
+    df = limpiar_columnas(df)
+    
+    # Identificar la columna de descripción/rubro
+    col_rubro = df.columns[0]
+    for col in df.columns:
+        c_low = str(col).lower()
+        if any(k in c_low for k in ['rubro', 'descripcion', 'concepto', 'producto', 'item', 'detalle']):
+            col_rubro = col
+            break
+    
+    # Limpiar y convertir columnas numéricas
+    cols_a_sumar = []
+    for col in df.columns:
+        if col == col_rubro:
+            continue
+        serie_str = df[col].astype(str).str.strip()
+        temp_col = serie_str.str.replace('$', '', regex=False).str.replace(' ', '', regex=False)
+        # Adaptar formato de números (ej: 1.234,56 o 50,00)
+        temp_col = temp_col.apply(lambda x: x.replace('.', '').replace(',', '.') if (',' in x and '.' in x) or (x.count('.') > 1) or (',' in x and x.find(',') > x.find('.')) else x.replace(',', '.'))
+        
+        converted = pd.to_numeric(temp_col, errors='coerce')
+        if converted.notna().sum() > 0:
+            df[col] = converted.fillna(0)
+            cols_a_sumar.append(col)
+    
+    if cols_a_sumar:
+        # Agrupar por rubro sumando las columnas numéricas
+        df_agrupado = df.groupby(col_rubro, as_index=False)[cols_a_sumar].sum()
+        return df_agrupado
     return df
 
 # Función robusta con caché corto para lectura desde la nube
@@ -89,32 +124,6 @@ def guardar_en_nube(sheet_name, df):
     except Exception as e:
         st.error(f"Error al guardar en la nube: {e}")
     return False
-
-# Lector robusto de tablas .HTM sin dependencias externas
-def leer_tabla_htm_directo(archivo):
-    try:
-        contenido = archivo.getvalue().decode("utf-8", errors="ignore")
-        soup = BeautifulSoup(contenido, "html.parser")
-        tabla = soup.find("table")
-        if not tabla:
-            return pd.DataFrame()
-        
-        rows = []
-        for tr in tabla.find_all("tr"):
-            cols = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
-            if cols:
-                rows.append(cols)
-        
-        if not rows:
-            return pd.DataFrame()
-            
-        max_len = max(len(r) for r in rows)
-        rows_padded = [r + [""] * (max_len - len(r)) for r in rows]
-        df = pd.DataFrame(rows_padded[1:], columns=rows_padded[0])
-        return limpiar_columnas(df)
-    except Exception as e:
-        st.error(f"Error al procesar el archivo HTML: {e}")
-        return pd.DataFrame()
 
 # Formateador de números estilo argentino
 def formato_arg(val, decimales=0):
@@ -231,143 +240,55 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         diff_desp = ((desp_2026 - desp_2025) / desp_2025 * 100) if desp_2025 > 0 else 0
         st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
 
-    st.markdown("---")
-
-    def calcular_mix_datos(df):
-        if df.empty:
-            return 0, 0, 0, 0, 0, 0
-        c_prod = "Producto" if "Producto" in df.columns else df.columns[2]
-        c_vol = "Volumen" if "Volumen" in df.columns else df.columns[3]
-        df_temp = df.copy()
-        df_temp['prod_lower'] = df_temp[c_prod].astype(str).str.lower()
-        
-        vs = df_temp[df_temp['prod_lower'].str.contains('super|ns xxi', case=False, na=False)][c_vol].sum()
-        vin = df_temp[df_temp['prod_lower'].str.contains('infinia', case=False, na=False) & ~df_temp['prod_lower'].str.contains('diesel', case=False, na=False)][c_vol].sum()
-        tot_naf = vs + vin
-
-        vd500 = df_temp[df_temp['prod_lower'].str.contains('500|d500|diesel 500', case=False, na=False)][c_vol].sum()
-        vind = df_temp[df_temp['prod_lower'].str.contains('infinia diesel|diesel infinia|go', case=False, na=False)][c_vol].sum()
-        tot_die = vd500 + vind
-        return vs, vin, tot_naf, vd500, vind, tot_die
-
-    vs_26, vin_26, tot_naf_26, vd500_26, vind_26, tot_die_26 = calcular_mix_datos(df_2026)
-    vs_25, vin_25, tot_naf_25, vd500_25, vind_25, tot_die_25 = calcular_mix_datos(df_2025)
-
-    st.markdown("### 📊 Mix de Ventas por Producto")
-    col_mix1, col_mix2 = st.columns(2)
-
-    with col_mix1:
-        st.markdown("#### 🟢 Mix Naftas (Super / NS XXI vs Infinia)")
-        if tot_naf_26 > 0 or tot_naf_25 > 0:
-            pct_s_26 = (vs_26 / tot_naf_26 * 100) if tot_naf_26 > 0 else 0
-            pct_i_26 = (vin_26 / tot_naf_26 * 100) if tot_naf_26 > 0 else 0
-            pct_s_25 = (vs_25 / tot_naf_25 * 100) if tot_naf_25 > 0 else 0
-            pct_i_25 = (vin_25 / tot_naf_25 * 100) if tot_naf_25 > 0 else 0
-
-            df_mix_naftas_comp = pd.DataFrame({
-                "Producto": ["Super / NS XXI", "Infinia"],
-                "Volumen 2026 (L)": [f"{formato_arg(vs_26, 2)} L", f"{formato_arg(vin_26, 2)} L"],
-                "Volumen 2025 (L)": [f"{formato_arg(vs_25, 2)} L", f"{formato_arg(vin_25, 2)} L"],
-                "Mix 2026 (%)": [f"{pct_s_26:.2f}%", f"{pct_i_26:.2f}%"],
-                "Mix 2025 (%)": [f"{pct_s_25:.2f}%", f"{pct_i_25:.2f}%"]
-            })
-            st.dataframe(df_mix_naftas_comp, use_container_width=True, hide_index=True)
-        else:
-            st.info("Sin datos suficientes para mix de naftas.")
-
-    with col_mix2:
-        st.markdown("#### 🛢️ Mix Diésel (GO - Infinia Diesel vs D. Diesel 500)")
-        if tot_die_26 > 0 or tot_die_25 > 0:
-            pct_d_26 = (vd500_26 / tot_die_26 * 100) if tot_die_26 > 0 else 0
-            pct_id_26 = (vind_26 / tot_die_26 * 100) if tot_die_26 > 0 else 0
-            pct_d_25 = (vd500_25 / tot_die_25 * 100) if tot_die_25 > 0 else 0
-            pct_id_25 = (vind_25 / tot_die_25 * 100) if tot_die_25 > 0 else 0
-
-            df_mix_diesel_comp = pd.DataFrame({
-                "Producto": ["D. Diesel 500", "GO - Infinia Diesel"],
-                "Volumen 2026 (L)": [f"{formato_arg(vd500_26, 2)} L", f"{formato_arg(vind_26, 2)} L"],
-                "Volumen 2025 (L)": [f"{formato_arg(vd500_25, 2)} L", f"{formato_arg(vind_25, 2)} L"],
-                "Mix 2026 (%)": [f"{pct_d_26:.2f}%", f"{pct_id_26:.2f}%"],
-                "Mix 2025 (%)": [f"{pct_d_25:.2f}%", f"{pct_id_25:.2f}%"]
-            })
-            st.dataframe(df_mix_diesel_comp, use_container_width=True, hide_index=True)
-        else:
-            st.info("Sin datos suficientes para mix de diésel.")
-
-    st.markdown("---")
-
-    with st.expander(f"📂 Ver Detalle de Cargas del año 2026 ({mes_seleccionado_comb})", expanded=True):
-        if not df_2026.empty:
-            cols_a_excluir_26 = [c for c in df_2026.columns if str(c).startswith('_') or c == 'prod_lower' or 'venta' in str(c).lower()]
-            df_mostrar_26 = df_2026.drop(columns=cols_a_excluir_26, errors='ignore')
-            st.dataframe(df_mostrar_26, use_container_width=True, hide_index=True)
-        else:
-            st.info(f"No hay registros en la nube para Combustibles 2026 - {mes_seleccionado_comb}.")
-
-    with st.expander(f"📂 Ver Detalle de Cargas del año 2025 ({mes_seleccionado_comb})"):
-        if not df_2025.empty:
-            cols_a_excluir_25 = [c for c in df_2025.columns if str(c).startswith('_') or c == 'prod_lower' or 'venta' in str(c).lower()]
-            df_mostrar_25 = df_2025.drop(columns=cols_a_excluir_25, errors='ignore')
-            st.dataframe(df_mostrar_25, use_container_width=True, hide_index=True)
-        else:
-            st.info(f"No hay registros en la nube para Combustibles 2025 - {mes_seleccionado_comb}.")
-
 # ==========================================
-# 3. TIENDA FULL
+# 3. TIENDA FULL (CON PEGADO MASIVO Y SUMA DE RUBROS)
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Seleccionar Mes y Año")
-    mes_seleccionado_full = st.sidebar.selectbox("Mes Full", meses_lista)
+    mes_seleccionado_full = st.sidebar.selectbox("Mes Full", meses_lista, key="mes_full_sel")
     anio_full = st.sidebar.selectbox("Año Full", [2026, 2025], index=0, key="anio_full_sel")
     
     st.sidebar.markdown("---")
-    st.sidebar.header("📥 Carga de Reportes .HTM (Turnos)")
-    turno_subida = st.sidebar.selectbox("Seleccionar Turno", ["Mañana", "Tarde"], key="turno_full_htm")
+    st.sidebar.header("📋 Carga por Pegado Masivo")
+    st.sidebar.info("Copiá la tabla desde tu reporte `.htm` abierto en el navegador y pegala acá abajo. El sistema sumará los rubros automáticamente.")
     
-    archivos_htm = st.sidebar.file_uploader(
-        f"Subir archivos .HTM ({turno_subida}) - {mes_seleccionado_full} {anio_full}", 
-        type=["htm", "html"], 
-        accept_multiple_files=True,
-        key=f"uploader_full_htm_{anio_full}_{mes_seleccionado_full}"
-    )
-
+    texto_pegado = st.sidebar.text_area("Pegá los datos aquí (Ctrl + V)", height=150, key=f"txt_pegar_full_{anio_full}_{mes_seleccionado_full}")
+    
     sheet_full_2026 = f"full_{mes_seleccionado_full.lower()}_2026"
     sheet_full_2025 = f"full_{mes_seleccionado_full.lower()}_2025"
     sheet_full_activa = sheet_full_2026 if anio_full == 2026 else sheet_full_2025
 
-    if archivos_htm:
-        for archivo_subido in archivos_htm:
-            df_subido = leer_tabla_htm_directo(archivo_subido)
-            if not df_subido.empty:
-                df_subido["Turno"] = turno_subida
-                df_subido["Archivo_Origen"] = archivo_subido.name
+    if st.sidebar.button("➕ Procesar y Sumar al Mes", key=f"btn_procesar_paste_{anio_full}_{mes_seleccionado_full}"):
+        if texto_pegado.strip():
+            try:
+                df_pegado = pd.read_csv(io.StringIO(texto_pegado), sep=None, engine='python')
+                df_pegado = limpiar_columnas(df_pegado)
+                df_procesado = procesar_y_sumar_rubros(df_pegado)
                 
                 key_state = f"full_{anio_full}"
                 if mes_seleccionado_full not in st.session_state[key_state]:
                     st.session_state[key_state][mes_seleccionado_full] = pd.DataFrame()
                 
                 df_actual = st.session_state[key_state][mes_seleccionado_full]
-                if df_actual.empty:
-                    st.session_state[key_state][mes_seleccionado_full] = df_subido
-                else:
-                    # Alineamos columnas y concatenamos de manera segura
-                    df_actual = limpiar_columnas(df_actual)
-                    df_subido = limpiar_columnas(df_subido)
-                    st.session_state[key_state][mes_seleccionado_full] = pd.concat([df_actual, df_subido], ignore_index=True)
                 
-                st.sidebar.success(f"¡Archivo {archivo_subido.name} ({turno_subida}) procesado!")
+                if df_actual.empty:
+                    st.session_state[key_state][mes_seleccionado_full] = df_procesado
+                else:
+                    # Combinar acumulando / sumando rubros repetidos
+                    df_combinado = pd.concat([df_actual, df_procesado], ignore_index=True)
+                    st.session_state[key_state][mes_seleccionado_full] = procesar_y_sumar_rubros(df_combinado)
+                
+                st.sidebar.success("¡Datos pegados y rubros sumados con éxito!")
+            except Exception as e:
+                st.sidebar.error(f"Error al procesar el texto pegado: {e}")
+        else:
+            st.sidebar.warning("El cuadro de texto está vacío.")
 
-        if st.sidebar.button("💾 Guardar Tienda Full en la Nube", key=f"btn_guardar_full_{anio_full}_{mes_seleccionado_full}"):
-            df_a_guardar = st.session_state[f"full_{anio_full}"].get(mes_seleccionado_full, pd.DataFrame())
-            if not df_a_guardar.empty:
-                with st.spinner("Guardando Tienda Full en Google Sheets..."):
-                    exito = guardar_en_nube(sheet_full_activa, df_a_guardar)
-                    if exito:
-                        st.sidebar.success("¡Tienda Full guardada en la nube con éxito!")
-                        st.cache_data.clear()
-                    else:
-                        st.sidebar.error("No se pudo guardar en la nube.")
+    if st.sidebar.button("🗑️ Borrar datos acumulados de este mes", key=f"btn_limpiar_full_{anio_full}_{mes_seleccionado_full}"):
+        st.session_state[f"full_{anio_full}"][mes_seleccionado_full] = pd.DataFrame()
+        st.sidebar.success("Se reiniciaron los datos de este mes.")
+        st.rerun()
 
     if mes_seleccionado_full not in st.session_state["full_2026"] or st.session_state["full_2026"][mes_seleccionado_full].empty:
         df_nube_full_26 = cargar_desde_nube(sheet_full_2026)
@@ -385,15 +306,26 @@ elif menu_principal == "🛒 TIENDA FULL":
         st.session_state["full_2025"].pop(mes_seleccionado_full, None)
         st.rerun()
 
+    if st.sidebar.button("💾 Guardar Tienda Full en la Nube", key=f"btn_guardar_full_{anio_full}_{mes_seleccionado_full}"):
+        df_a_guardar = st.session_state[f"full_{anio_full}"].get(mes_seleccionado_full, pd.DataFrame())
+        if not df_a_guardar.empty:
+            with st.spinner("Guardando Tienda Full en Google Sheets..."):
+                exito = guardar_en_nube(sheet_full_activa, df_a_guardar)
+                if exito:
+                    st.sidebar.success("¡Tienda Full guardada en la nube con éxito!")
+                    st.cache_data.clear()
+                else:
+                    st.sidebar.error("No se pudo guardar en la nube.")
+
     st.title(f"🛒 Tienda Full - {mes_seleccionado_full} (2026 vs 2025)")
     df_rubros_26 = limpiar_columnas(st.session_state["full_2026"].get(mes_seleccionado_full, pd.DataFrame()))
     df_rubros_25 = limpiar_columnas(st.session_state["full_2025"].get(mes_seleccionado_full, pd.DataFrame()))
 
-    st.markdown(f"### 📋 Tienda Full - 2026")
+    st.markdown(f"### 📋 Tienda Full - 2026 (Consolidado)")
     if not df_rubros_26.empty:
         st.dataframe(df_rubros_26, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de Tienda Full en la nube para 2026 - {mes_seleccionado_full}.")
+        st.info(f"No hay registros acumulados para 2026 - {mes_seleccionado_full}. Pegá los datos en la barra lateral para empezar.")
 
     with st.expander(f"📂 Ver Tienda Full del año 2025 ({mes_seleccionado_full})"):
         if not df_rubros_25.empty:
