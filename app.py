@@ -26,7 +26,6 @@ meses_lista = [
 # URL de Google Apps Script actualizada
 URL_NUBE = "https://script.google.com/macros/s/AKfycbxKBg59r94ZC8hK4VmrmN3SWx6rg1lIvfcAiLf4KxFYzDcUut54KBPPvO9sRf6akwUQ/exec"
 
-# Función para limpiar y evitar nombres de columnas duplicados
 def limpiar_columnas(df):
     if df.empty:
         return df
@@ -45,51 +44,71 @@ def limpiar_columnas(df):
     df.columns = cols_limpias
     return df
 
-# Función para leer archivos subidos (soporta CSV, Excel y HTM/HTML de YPF)
+# Lector universal ultra robusto para HTM/HTML de YPF
 def leer_archivo_universal(uploaded_file):
     if uploaded_file is None:
         return pd.DataFrame()
+    
     nombre = uploaded_file.name.lower()
+    contenido_bytes = uploaded_file.read()
+    
+    # 1. Si es HTML/HTM, intentamos parsearlo con BeautifulSoup y pandas
+    if nombre.endswith(('.htm', '.html')):
+        for encoding in ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']:
+            try:
+                html_str = contenido_bytes.decode(encoding, errors='ignore')
+                # Intentar leer tablas con pandas
+                dfs = pd.read_html(io.StringIO(html_str))
+                if dfs:
+                    # Buscamos la tabla que tenga más filas o columnas (la que contiene los datos del turno)
+                    df_mas_grande = max(dfs, key=lambda d: d.shape[0] * d.shape[1])
+                    if not df_mas_grande.empty:
+                        return df_mas_grande
+            except Exception:
+                continue
+                
+        # Si falló pd.read_html, intentamos extraer manualmente filas <tr> y celdas <td> con BeautifulSoup
+        try:
+            soup = BeautifulSoup(contenido_bytes, 'html.parser')
+            filas_datos = []
+            for tr in soup.find_all('tr'):
+                cols = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
+                if cols:
+                    filas_datos.append(cols)
+            if filas_datos:
+                max_len = max(len(f) for f in filas_datos)
+                # Normalizar filas al mismo ancho
+                filas_norm = [f + [''] * (max_len - len(f)) for f in filas_datos]
+                return pd.DataFrame(filas_norm)
+        except Exception:
+            pass
+
+    # 2. Si es Excel o CSV
     try:
         if nombre.endswith('.csv'):
-            return pd.read_csv(uploaded_file)
+            return pd.read_csv(io.BytesIO(contenido_bytes))
         elif nombre.endswith(('.xls', '.xlsx')):
-            return pd.read_excel(uploaded_file)
-        elif nombre.endswith(('.htm', '.html')):
-            dfs = pd.read_html(uploaded_file)
-            if dfs:
-                return dfs[0]
-    except Exception:
-        pass
-    
-    uploaded_file.seek(0)
-    try:
-        return pd.read_excel(uploaded_file)
+            return pd.read_excel(io.BytesIO(contenido_bytes))
     except:
         pass
     
-    uploaded_file.seek(0)
-    try:
-        dfs = pd.read_html(uploaded_file)
-        if dfs:
-            return dfs[0]
-    except:
-        pass
+    # Intentos genéricos por si el formato difiere
+    for func in [pd.read_excel, pd.read_csv]:
+        try:
+            uploaded_file.seek(0)
+            return func(uploaded_file)
+        except:
+            pass
 
-    uploaded_file.seek(0)
-    try:
-        return pd.read_csv(uploaded_file)
-    except:
-        return pd.DataFrame()
+    return pd.DataFrame()
 
-# Función inteligente mejorada: extrae solo la cantidad de unidades y descarta precios/totales
 def procesar_turno_full(df):
     if df.empty:
         return {
             "Bebidas_Calientes": 0.0,
             "Comida_Elaborada_y_Envasada": 0.0,
             "Cigarrillos": 0.0
-        }
+        }, "DataFrame vacío"
     
     df = limpiar_columnas(df)
     
@@ -97,8 +116,9 @@ def procesar_turno_full(df):
     val_comida = 0.0
     val_cigarros = 0.0
     
+    encontrados = []
+    
     for idx, row in df.iterrows():
-        # Unir todo el texto de la fila para detectar el código o concepto sin importar la columna
         texto_fila = " ".join([str(val) for val in row.values]).lower()
         
         es_bebida = bool(re.search(r'02-232|bebidas?\s*caliente', texto_fila))
@@ -108,8 +128,6 @@ def procesar_turno_full(df):
         if not (es_bebida or es_comida or es_cigarro):
             continue
             
-        # Buscar estrictamente la PRIMERA columna numérica de la fila (Cantidad de Unidades)
-        # Esto descarta automáticamente los montos altos de dinero (como 54300,00 de totales)
         cantidad_encontrada = 0.0
         for col in df.columns:
             val_str = str(row[col]).strip()
@@ -121,28 +139,29 @@ def procesar_turno_full(df):
             
             try:
                 num = float(val_limpio)
-                # Filtro lógico: las unidades en un turno son números menores a 10000 
-                # (evita agarrar precios totales altos o códigos extraños)
                 if 0 <= num < 10000:
                     cantidad_encontrada = num
-                    break # Encontramos la cantidad exacta, detenemos la búsqueda en esta fila
+                    break 
             except:
                 continue
                 
         if es_bebida:
             val_bebidas += cantidad_encontrada
+            encontrados.append(f"Bebidas Calientes: {cantidad_encontrada} (Fila: {texto_fila[:50]})")
         elif es_comida:
             val_comida += cantidad_encontrada
+            encontrados.append(f"Comida: {cantidad_encontrada} (Fila: {texto_fila[:50]})")
         elif es_cigarro:
             val_cigarros += cantidad_encontrada
+            encontrados.append(f"Cigarrillos: {cantidad_encontrada} (Fila: {texto_fila[:50]})")
             
+    detalle_log = " | ".join(encontrados) if encontrados else "No se detectaron los códigos buscados en el archivo."
     return {
         "Bebidas_Calientes": val_bebidas,
         "Comida_Elaborada_y_Envasada": val_comida,
         "Cigarrillos": val_cigarros
-    }
+    }, detalle_log
 
-# Función robusta con caché corto para lectura desde la nube
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desde_nube(sheet_name):
     try:
@@ -166,7 +185,6 @@ def cargar_desde_nube(sheet_name):
         st.warning(f"No se pudo conectar con la nube: {e}")
     return pd.DataFrame()
 
-# Función para enviar datos a Google Sheets
 def guardar_en_nube(sheet_name, df):
     try:
         if URL_NUBE and not df.empty:
@@ -187,7 +205,6 @@ def guardar_en_nube(sheet_name, df):
         st.error(f"Error al guardar en la nube: {e}")
     return False
 
-# Formateador de números estilo argentino
 def formato_arg(val, decimales=0):
     try:
         if decimales > 0:
@@ -198,113 +215,17 @@ def formato_arg(val, decimales=0):
     except:
         return str(val)
 
-# Menú principal en la barra lateral
 menu_principal = st.sidebar.selectbox(
     "Menú Principal", 
     ["📊 DASHBOARD", "⛽ COMBUSTIBLES", "🛒 TIENDA FULL", "📦 BOXES", "🎯 +YPF"]
 )
 
-# ==========================================
-# 1. DASHBOARD
-# ==========================================
 if menu_principal == "📊 DASHBOARD":
-    st.title("📊 Dashboard General (Comparativa 2026 vs 2025)")
-    st.info("Panel de control centralizado de la estación con comparativa interanual.")
+    st.title("📊 Dashboard General")
 
-# ==========================================
-# 2. COMBUSTIBLES
-# ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
-    st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes y Año")
-    mes_seleccionado_comb = st.sidebar.selectbox("Mes Combustibles", meses_lista)
+    st.title("⛽ COMBUSTIBLES")
 
-    st.sidebar.markdown("---")
-    st.sidebar.header("📥 Carga Manual de Archivo")
-    anio_subida = st.sidebar.selectbox("Año destino del archivo", [2026, 2025], index=0)
-    archivo_subido = st.sidebar.file_uploader(f"Subir Excel/CSV - {mes_seleccionado_comb} ({anio_subida})", type=["csv", "xlsx", "xls"], key=f"uploader_comb_{anio_subida}_{mes_seleccionado_comb}")
-    
-    sheet_comb_2026 = f"combustibles_{mes_seleccionado_comb.lower()}_2026"
-    sheet_comb_2025 = f"combustibles_{mes_seleccionado_comb.lower()}_2025"
-    sheet_activa = sheet_comb_2026 if anio_subida == 2026 else sheet_comb_2025
-
-    if archivo_subido is not None:
-        try:
-            if archivo_subido.name.endswith('.csv'):
-                df_subido = pd.read_csv(archivo_subido)
-            else:
-                df_subido = pd.read_excel(archivo_subido)
-            
-            df_subido = limpiar_columnas(df_subido)
-            if not df_subido.empty:
-                st.session_state[f"combustibles_{anio_subida}"][mes_seleccionado_comb] = df_subido
-                st.sidebar.success(f"¡Archivo leído correctamente para {anio_subida}!")
-                
-                if st.sidebar.button("💾 Guardar permanentemente en la Nube", key=f"btn_guardar_{anio_subida}_{mes_seleccionado_comb}"):
-                    with st.spinner("Guardando en Google Sheets..."):
-                        exito = guardar_en_nube(sheet_activa, df_subido)
-                        if exito:
-                            st.sidebar.success("¡Guardado en la nube con éxito!")
-                            st.cache_data.clear()
-                        else:
-                            st.sidebar.error("No se pudo guardar en la nube.")
-        except Exception as e:
-            st.sidebar.error(f"Error al leer el archivo: {e}")
-
-    if mes_seleccionado_comb not in st.session_state["combustibles_2026"] or st.session_state["combustibles_2026"][mes_seleccionado_comb].empty:
-        df_nube_2026 = cargar_desde_nube(sheet_comb_2026)
-        if not df_nube_2026.empty:
-            st.session_state["combustibles_2026"][mes_seleccionado_comb] = df_nube_2026
-
-    if mes_seleccionado_comb not in st.session_state["combustibles_2025"] or st.session_state["combustibles_2025"][mes_seleccionado_comb].empty:
-        df_nube_2025 = cargar_desde_nube(sheet_comb_2025)
-        if not df_nube_2025.empty:
-            st.session_state["combustibles_2025"][mes_seleccionado_comb] = df_nube_2025
-
-    if st.sidebar.button("🔄 Actualizar Datos desde la Nube"):
-        st.cache_data.clear()
-        st.session_state["combustibles_2026"].pop(mes_seleccionado_comb, None)
-        st.session_state["combustibles_2025"].pop(mes_seleccionado_comb, None)
-        st.rerun()
-
-    df_2026 = st.session_state["combustibles_2026"].get(mes_seleccionado_comb, pd.DataFrame())
-    df_2025 = st.session_state["combustibles_2025"].get(mes_seleccionado_comb, pd.DataFrame())
-
-    st.subheader(f"⛽ COMBUSTIBLES - {mes_seleccionado_comb} (2026 vs 2025)")
-
-    vol_2026, desp_2026 = 0, 0
-    if not df_2026.empty:
-        if len(df_2026) > 0 and any("fecha" in str(v).lower() for v in df_2026.iloc[0].values):
-            df_2026.columns = df_2026.iloc[0].astype(str).str.strip()
-            df_2026 = df_2026.iloc[1:].reset_index(drop=True)
-        df_2026 = limpiar_columnas(df_2026)
-        c_vol_26 = "Volumen" if "Volumen" in df_2026.columns else df_2026.columns[3]
-        df_2026[c_vol_26] = pd.to_numeric(df_2026[c_vol_26], errors='coerce').fillna(0)
-        vol_2026 = df_2026[c_vol_26].sum()
-        desp_2026 = len(df_2026)
-
-    vol_2025, desp_2025 = 0, 0
-    if not df_2025.empty:
-        if len(df_2025) > 0 and any("fecha" in str(v).lower() for v in df_2025.iloc[0].values):
-            df_2025.columns = df_2025.iloc[0].astype(str).str.strip()
-            df_2025 = df_2025.iloc[1:].reset_index(drop=True)
-        df_2025 = limpiar_columnas(df_2025)
-        c_vol_25 = "Volumen" if "Volumen" in df_2025.columns else df_2025.columns[3]
-        df_2025[c_vol_25] = pd.to_numeric(df_2025[c_vol_25], errors='coerce').fillna(0)
-        vol_2025 = df_2025[c_vol_25].sum()
-        desp_2025 = len(df_2025)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        diff_vol = ((vol_2026 - vol_2025) / vol_2025 * 100) if vol_2025 > 0 else 0
-        st.metric("📦 Volumen Total (L) 2026", f"{formato_arg(vol_2026, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_2025, 0)} L)")
-    with col2:
-        diff_desp = ((desp_2026 - desp_2025) / desp_2025 * 100) if desp_2025 > 0 else 0
-        st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
-
-# ==========================================
-# 3. TIENDA FULL (CALENDARIO POR DÍA Y TURNO - CARGA DE ARCHIVO)
-# ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Configuración de Mes y Año")
@@ -338,7 +259,15 @@ elif menu_principal == "🛒 TIENDA FULL":
         if archivo_turno is not None:
             try:
                 df_nuevo = leer_archivo_universal(archivo_turno)
-                resultado_turno = procesar_turno_full(df_nuevo)
+                
+                # Depuración visual para ver qué leyó el archivo
+                if not df_nuevo.empty:
+                    st.success(f"Archivo leído con éxito. Dimensiones de la tabla: {df_nuevo.shape[0]} filas x {df_nuevo.shape[1]} columnas.")
+                else:
+                    st.error("El archivo se leyó pero devolvió una tabla vacía.")
+                
+                resultado_turno, log_depuracion = procesar_turno_full(df_nuevo)
+                st.info(f"🔍 **Log de lectura:** {log_depuracion}")
                 
                 nueva_fila = {
                     "Dia": dia_sel,
@@ -360,9 +289,9 @@ elif menu_principal == "🛒 TIENDA FULL":
 
                 st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_combinado
                 guardar_en_nube(sheet_full_name, df_combinado)
-                st.sidebar.success(f"¡Turno Día {dia_sel} ({turno_sel}) procesado y guardado!")
+                st.sidebar.success(f"¡Turno Día {dia_sel} ({turno_sel}) guardado correctamente!")
             except Exception as e:
-                st.sidebar.error(f"Error al procesar el archivo: {e}")
+                st.sidebar.error(f"Error crítico al procesar: {e}")
         else:
             st.sidebar.warning("Por favor, subí un archivo antes de guardar.")
 
@@ -374,7 +303,6 @@ elif menu_principal == "🛒 TIENDA FULL":
             st.sidebar.success("Datos actualizados desde la nube.")
             st.rerun()
 
-    # Vista Principal de Tienda Full
     st.title(f"🛒 Tienda Full - Calendario de Ventas ({mes_full} {anio_full})")
 
     df_mes = st.session_state[f"full_calendar_{anio_full}"].get(mes_full, pd.DataFrame())
@@ -390,9 +318,8 @@ elif menu_principal == "🛒 TIENDA FULL":
         })
         st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay turnos cargados para {mes_full} {anio_full}. Utilizá la barra lateral para subir los archivos de cada turno.")
+        st.info(f"No hay turnos cargados para {mes_full} {anio_full}. Subí un archivo desde la barra lateral.")
 
-    # Comparativa 2026 vs 2025
     st.markdown("---")
     st.subheader(f"📊 Comparativa Mensual Full (Cantidades): 2026 vs 2025 ({mes_full})")
     
@@ -419,80 +346,8 @@ elif menu_principal == "🛒 TIENDA FULL":
     with col_f3:
         st.metric(f"🚬 Cigarrillos", f"{formato_arg(cigar_26, 2)} unid.", delta=f"{diff_cigar:+.2f}% vs 2025 ({formato_arg(cigar_25, 2)})")
 
-# ==========================================
-# 4. BOXES
-# ==========================================
 elif menu_principal == "📦 BOXES":
-    st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes")
-    mes_seleccionado_boxes = st.sidebar.selectbox("Mes Boxes", meses_lista)
+    st.title("📦 BOXES")
 
-    sheet_boxes_2026 = f"boxes_{mes_seleccionado_boxes.lower()}_2026"
-    sheet_boxes_2025 = f"boxes_{mes_seleccionado_boxes.lower()}_2025"
-
-    if mes_seleccionado_boxes not in st.session_state["boxes_2026"] or st.session_state["boxes_2026"][mes_seleccionado_boxes].empty:
-        df_nube_boxes_26 = cargar_desde_nube(sheet_boxes_2026)
-        if not df_nube_boxes_26.empty:
-            st.session_state["boxes_2026"][mes_seleccionado_boxes] = df_nube_boxes_26
-
-    if mes_seleccionado_boxes not in st.session_state["boxes_2025"] or st.session_state["boxes_2025"][mes_seleccionado_boxes].empty:
-        df_nube_boxes_25 = cargar_desde_nube(sheet_boxes_2025)
-        if not df_nube_boxes_25.empty:
-            st.session_state["boxes_2025"][mes_seleccionado_boxes] = df_nube_boxes_25
-
-    if st.sidebar.button("🔄 Actualizar Boxes desde la Nube"):
-        st.cache_data.clear()
-        st.session_state["boxes_2026"].pop(mes_seleccionado_boxes, None)
-        st.session_state["boxes_2025"].pop(mes_seleccionado_boxes, None)
-        st.rerun()
-
-    df_b_26 = limpiar_columnas(st.session_state["boxes_2026"].get(mes_seleccionado_boxes, pd.DataFrame()))
-    df_b_25 = limpiar_columnas(st.session_state["boxes_2025"].get(mes_seleccionado_boxes, pd.DataFrame()))
-
-    st.subheader(f"📦 BOXES - {mes_seleccionado_boxes} (2026 vs 2025)")
-
-    st.markdown(f"### 📋 Boxes - 2026")
-    if not df_b_26.empty:
-        st.dataframe(df_b_26, use_container_width=True, hide_index=True)
-    else:
-        st.info(f"No hay registros de Boxes en la nube para 2026 - {mes_seleccionado_boxes}.")
-
-    with st.expander(f"📂 Ver Boxes del año 2025 ({mes_seleccionado_boxes})"):
-        if not df_b_25.empty:
-            st.dataframe(df_b_25, use_container_width=True, hide_index=True)
-        else:
-            st.info(f"No hay registros de Boxes en la nube para 2025 - {mes_seleccionado_boxes}.")
-
-# ==========================================
-# 5. TABLERO YPF
-# ==========================================
 elif menu_principal == "🎯 +YPF":
-    st.sidebar.markdown("---")
-    st.sidebar.header("🎯 Configuración YPF")
-    mes_seleccionado_ypf = st.sidebar.selectbox("Mes YPF", meses_lista)
-
-    st.subheader(f"🎯 Tablero de Exigencias YPF - {mes_seleccionado_ypf} (2026)")
-
-    datos_ypf_base = [
-        {"Concepto": "Volumen Diesel m3 (Infinia Diesel + D500)", "Objetivo mínimo": 59700.0, "Objetivo máximo": 69700.0, "Real": 59394.0, "Puntos posibles": 20},
-        {"Concepto": "Volumen nafta m3 (Infinia + Super)", "Objetivo mínimo": 427000.0, "Objetivo máximo": 498100.0, "Real": 424652.0, "Puntos posibles": 25},
-        {"Concepto": "Mix nafta infinia", "Objetivo mínimo": 30.70, "Objetivo máximo": 35.80, "Real": 35.98, "Puntos posibles": 10},
-        {"Concepto": "Volumen lubricante m3 (trimestral)", "Objetivo mínimo": 2610.0, "Objetivo máximo": 2900.0, "Real": 2052.0, "Puntos posibles": 10},
-        {"Concepto": "Crosselling", "Objetivo mínimo": 30.70, "Objetivo máximo": 37.60, "Real": 31.45, "Puntos posibles": 5},
-        {"Concepto": "Unidades totales (sin tabaco)", "Objetivo mínimo": 9264.0, "Objetivo máximo": 10808.0, "Real": 9582.0, "Puntos posibles": 10},
-        {"Concepto": "Unidades Comida y Cafetería", "Objetivo mínimo": 1930.0, "Objetivo máximo": 2133.0, "Real": 3674.0, "Puntos posibles": 10},
-        {"Concepto": "Cliente Incognito", "Objetivo mínimo": 75.0, "Objetivo máximo": 100.0, "Real": 91.80, "Puntos posibles": 10}
-    ]
-
-    df_ypf = pd.DataFrame(datos_ypf_base)
-    st.data_editor(df_ypf, use_container_width=True, hide_index=True, key=f"editor_ypf_{mes_seleccionado_ypf}")
-
-    st.markdown("---")
-    st.subheader("📊 Resumen de Evaluación")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Puntos Totales Posibles", value="95")
-    with col2:
-        st.metric(label="Puntos Obtenidos (Estimados)", value="34.74")
-    with col3:
-        st.metric(label="Estado General", value="En Seguimiento 🟡")
+    st.title("🎯 +YPF")
