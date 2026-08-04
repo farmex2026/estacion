@@ -175,22 +175,30 @@ def procesar_turno_full(uploaded_file):
         "Cigarrillos": val_cigarros
     }, detalle_log
 
-# Procesador avanzado de Combustibles (F2 para total + Desglose de productos y mixes)
+# Procesador de Combustibles (E1 = Despachos, F1 = Litros Totales | Excluyendo fila 1 de la tabla visible)
 def procesar_combustibles_df(df):
     if df.empty:
         return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
     df = limpiar_columnas(df)
     
     vol_total = 0.0
+    despachos = 0
+    
     try:
-        # F2 corresponde a la fila 1 (índice 0) y columna F (índice 5)
+        # E1 es columna índice 4, F1 es columna índice 5 (de la fila 0 / iloc[0])
         if len(df) > 0 and len(df.columns) >= 6:
-            val_f2 = df.iloc[0, 5]
-            val_str = str(val_f2).replace('$', '').replace('L', '').replace('.', '').replace(',', '.').strip()
-            vol_total = float(val_str)
+            val_e1 = df.iloc[0, 4]
+            val_f1 = df.iloc[0, 5]
+            
+            val_str_f1 = str(val_f1).replace('$', '').replace('L', '').replace('.', '').replace(',', '.').strip()
+            vol_total = float(val_str_f1)
+            
+            val_str_e1 = str(val_e1).replace('$', '').replace('.', '').replace(',', '.').strip()
+            despachos = int(float(val_str_e1))
     except Exception:
-        vol_total = 0.0
+        pass
 
+    # Respaldos automáticos si vinieran vacíos
     if vol_total == 0.0:
         for c in df.columns:
             if any(term in str(c).lower() for term in ['volumen', 'litros', 'cantidad', 'vol']):
@@ -203,13 +211,19 @@ def procesar_combustibles_df(df):
                 except:
                     pass
 
-    # Búsqueda de productos específicos (Super, Infinia Nafta, Diesel 500, Infinia Diesel)
+    # Creamos un dataframe limpio para mostrar en la tabla (excluyendo la fila 0 donde estaban E1 y F1)
+    df_registros = df.iloc[1:].copy() if len(df) > 1 else df.copy()
+
+    if despachos == 0:
+        despachos = len(df_registros)
+
+    # Análisis de productos específicos en las filas restantes
     vol_super = 0.0
     vol_infinia_nafta = 0.0
     vol_diesel_500 = 0.0
     vol_infinia_diesel = 0.0
 
-    for _, row in df.iterrows():
+    for _, row in df_registros.iterrows():
         fila_texto = " ".join([str(val).lower() for val in row.values])
         
         nums = []
@@ -217,7 +231,7 @@ def procesar_combustibles_df(df):
             val_s = str(val).replace('$', '').replace('.', '').replace(',', '.').strip()
             try:
                 num = float(val_s)
-                if num > 10:  # Descartamos códigos pequeños o fechas
+                if num > 10:
                     nums.append(num)
             except:
                 continue
@@ -239,8 +253,7 @@ def procesar_combustibles_df(df):
     total_diesel = vol_diesel_500 + vol_infinia_diesel
     mix_infinia_diesel = (vol_infinia_diesel / total_diesel * 100) if total_diesel > 0 else 0.0
 
-    despachos = len(df)
-    return vol_total, despachos, vol_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df
+    return vol_total, despachos, vol_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df_registros
 
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desde_nube(sheet_name):
@@ -356,21 +369,19 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     df_comb_26 = st.session_state["combustibles_2026"].get(mes_comb, pd.DataFrame())
     df_comb_25 = st.session_state["combustibles_2025"].get(mes_comb, pd.DataFrame())
 
-    # Procesar 2026 y 2025 con detalle de productos y mixes
     res_26 = procesar_combustibles_df(df_comb_26)
     vol_26, desp_26, sup_26, inf_n_26, mix_n_26, d500_26, inf_d_26, mix_d_26, df_proc_26 = res_26
 
     res_25 = procesar_combustibles_df(df_comb_25)
     vol_25, desp_25, sup_25, inf_n_25, mix_n_25, d500_25, inf_d_25, mix_d_25, df_proc_25 = res_25
 
-    # Métricas principales de Volumen Total y Despachos
     col1, col2 = st.columns(2)
     with col1:
         diff_vol = ((vol_26 - vol_25) / vol_25 * 100) if vol_25 > 0 else 0
-        st.metric("📦 Volumen Total (L) (F2)", f"{formato_arg(vol_26, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_25, 0)} L)")
+        st.metric("📦 Volumen Total (L) (F1)", f"{formato_arg(vol_26, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_25, 0)} L)")
     with col2:
         diff_desp = ((desp_26 - desp_25) / desp_25 * 100) if desp_25 > 0 else 0
-        st.metric("🔢 Registros / Filas", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025")
+        st.metric("🔢 Despachos (E1)", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_25)})")
 
     st.markdown("---")
     st.subheader(f"🚗 Detalle de Naftas: S XXI (Super) vs. Infinia Nafta ({anio_comb})")
@@ -393,10 +404,10 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("📊 Mix Infinia Diesel", f"{formato_arg(mix_d_26, 2)} %")
 
     st.markdown("---")
-    st.markdown(f"### 📋 Detalle de Registros en Bruto - {anio_comb}")
-    df_activo = df_comb_26 if anio_comb == 2026 else df_comb_25
-    if not df_activo.empty:
-        st.dataframe(df_activo, use_container_width=True, hide_index=True)
+    st.markdown(f"### 📋 Detalle de Registros - {anio_comb} (Sin celdas E1/F1)")
+    df_activo_proc = df_proc_26 if anio_comb == 2026 else df_proc_25
+    if not df_activo_proc.empty:
+        st.dataframe(df_activo_proc, use_container_width=True, hide_index=True)
     else:
         st.info(f"No hay registros de combustibles cargados para {mes_comb} {anio_comb}. Subí un archivo desde la barra lateral.")
 
