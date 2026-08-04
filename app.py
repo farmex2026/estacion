@@ -175,17 +175,16 @@ def procesar_turno_full(uploaded_file):
         "Cigarrillos": val_cigarros
     }, detalle_log
 
-# Procesador de Combustibles (E1 = Despachos, F1 = Litros Totales | Excluyendo fila 1 de la tabla visible)
+# Procesador de Combustibles (E1 = Despachos, F1 = Litros Totales | Cuadre exacto con Otros)
 def procesar_combustibles_df(df):
     if df.empty:
-        return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
+        return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
     df = limpiar_columnas(df)
     
     vol_total = 0.0
     despachos = 0
     
     try:
-        # E1 es columna índice 4, F1 es columna índice 5 (de la fila 0 / iloc[0])
         if len(df) > 0 and len(df.columns) >= 6:
             val_e1 = df.iloc[0, 4]
             val_f1 = df.iloc[0, 5]
@@ -244,6 +243,10 @@ def procesar_combustibles_df(df):
         elif 'euro' in fila_texto or 'infinia diesel' in fila_texto or ('infinia' in fila_texto and 'diesel' in fila_texto):
             vol_infinia_diesel += val_fila
 
+    # Cuadre exacto: Calculamos lo que sobra como "Otros" para que la suma cuadre exactamente con F1
+    suma_detectada = vol_super + vol_infinia_nafta + vol_diesel_500 + vol_infinia_diesel
+    vol_otros = max(0.0, vol_total - suma_detectada)
+
     total_naftas = vol_super + vol_infinia_nafta
     mix_super = (vol_super / total_naftas * 100) if total_naftas > 0 else 0.0
     mix_infinia_nafta = (vol_infinia_nafta / total_naftas * 100) if total_naftas > 0 else 0.0
@@ -252,7 +255,7 @@ def procesar_combustibles_df(df):
     mix_diesel_500 = (vol_diesel_500 / total_diesel * 100) if total_diesel > 0 else 0.0
     mix_infinia_diesel = (vol_infinia_diesel / total_diesel * 100) if total_diesel > 0 else 0.0
 
-    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df_registros
+    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, vol_otros, df_registros
 
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desde_nube(sheet_name):
@@ -369,10 +372,10 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     df_comb_25 = st.session_state["combustibles_2025"].get(mes_comb, pd.DataFrame())
 
     res_26 = procesar_combustibles_df(df_comb_26)
-    vol_26, desp_26, sup_26, mix_sup_26, inf_n_26, mix_inf_n_26, d500_26, mix_d500_26, inf_d_26, mix_inf_d_26, df_proc_26 = res_26
+    vol_26, desp_26, sup_26, mix_sup_26, inf_n_26, mix_inf_n_26, d500_26, mix_d500_26, inf_d_26, mix_inf_d_26, otros_26, df_proc_26 = res_26
 
     res_25 = procesar_combustibles_df(df_comb_25)
-    vol_25, desp_25, sup_25, mix_sup_25, inf_n_25, mix_inf_n_25, d500_25, mix_d500_25, inf_d_25, mix_inf_d_25, df_proc_25 = res_25
+    vol_25, desp_25, sup_25, mix_sup_25, inf_n_25, mix_inf_n_25, d500_25, mix_d500_25, inf_d_25, mix_inf_d_25, otros_25, df_proc_25 = res_25
 
     col1, col2 = st.columns(2)
     with col1:
@@ -383,20 +386,25 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("🔢 Despachos (E1)", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_25)})")
 
     st.markdown("---")
-    st.subheader(f"🚗 Mix de Naftas: S XXI (Super) vs. Nafta Infinia ({anio_comb})")
+    st.markdown("**🚗 Naftas**")
     cn1, cn2 = st.columns(2)
     with cn1:
-        st.metric("🟢 Nafta S XXI (Super)", f"{formato_arg(sup_26, 0)} L", delta=f"Mix: {formato_arg(mix_sup_26, 2)}%")
+        st.metric("🟢 S XXI (Super)", f"{formato_arg(sup_26, 0)} L", delta=f"Mix: {formato_arg(mix_sup_26, 2)}%")
     with cn2:
-        st.metric("🟣 Nafta Infinia", f"{formato_arg(inf_n_26, 0)} L", delta=f"Mix: {formato_arg(mix_inf_n_26, 2)}%")
+        st.metric("🟣 Infinia Nafta", f"{formato_arg(inf_n_26, 0)} L", delta=f"Mix: {formato_arg(mix_inf_n_26, 2)}%")
 
     st.markdown("---")
-    st.subheader(f"🚚 Mix de Diesels: Diesel 500 vs. Infinia Diesel / Euro ({anio_comb})")
+    st.markdown("**🚚 Diesels**")
     cd1, cd2 = st.columns(2)
     with cd1:
         st.metric("🟡 Diesel 500", f"{formato_arg(d500_26, 0)} L", delta=f"Mix: {formato_arg(mix_d500_26, 2)}%")
     with cd2:
         st.metric("🔵 Infinia Diesel", f"{formato_arg(inf_d_26, 0)} L", delta=f"Mix: {formato_arg(mix_inf_d_26, 2)}%")
+
+    if otros_26 > 0:
+        st.markdown("---")
+        st.markdown("**📦 Otros / Sin clasificar**")
+        st.metric("⚪ Otros", f"{formato_arg(otros_26, 0)} L")
 
     st.markdown("---")
     st.markdown(f"### 📋 Detalle de Registros - {anio_comb} (Sin celdas E1/F1)")
