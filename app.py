@@ -262,7 +262,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             st.info(f"No hay registros en la nube para Combustibles 2025 - {mes_seleccionado_comb}.")
 
 # ==========================================
-# 3. TIENDA FULL (ACTUALIZADO PARA ARCHIVOS .HTM POR TURNOS)
+# 3. TIENDA FULL (ACTUALIZADO CON BS4 PARA .HTM)
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
@@ -288,7 +288,8 @@ elif menu_principal == "🛒 TIENDA FULL":
     if archivos_htm:
         for archivo_subido in archivos_htm:
             try:
-                tablas = pd.read_html(archivo_subido)
+                # Usamos flavor='bs4' para evitar el error de lxml faltante
+                tablas = pd.read_html(archivo_subido, flavor='bs4')
                 if tablas:
                     df_subido = tablas[0]
                     df_subido["Turno"] = turno_subida
