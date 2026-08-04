@@ -175,40 +175,35 @@ def procesar_turno_full(uploaded_file):
         "Cigarrillos": val_cigarros
     }, detalle_log
 
-# Procesador de Combustibles
+# Procesador de Combustibles (Leyendo directamente desde la celda F2 del Google Sheet online)
 def procesar_combustibles_df(df):
     if df.empty:
         return 0.0, 0, df
     df = limpiar_columnas(df)
     
-    # Si la primera fila tiene encabezados reales
-    if len(df) > 0 and any("fecha" in str(v).lower() for v in df.iloc[0].values):
-        df.columns = df.iloc[0].astype(str).str.strip()
-        df = df.iloc[1:].reset_index(drop=True)
-        df = limpiar_columnas(df)
-
-    col_vol = None
-    for c in df.columns:
-        c_low = c.lower()
-        if any(term in c_low for term in ['volumen', 'litros', 'cantidad', 'vol']):
-            col_vol = c
-            break
-            
-    if not col_vol and len(df.columns) > 3:
-        col_vol = df.columns[3]
-        
-    if col_vol:
-        df[col_vol] = pd.to_numeric(
-            df[col_vol].astype(str)
-            .str.replace('.', '', regex=False)
-            .str.replace(',', '.', regex=False)
-            .str.replace('$', '', regex=False), 
-            errors='coerce'
-        ).fillna(0)
-        vol_total = df[col_vol].sum()
-    else:
+    vol_total = 0.0
+    try:
+        # F2 corresponde a la fila 1 de datos (índice 0) y columna F (índice 5: A=0, B=1, C=2, D=3, E=4, F=5)
+        if len(df) > 0 and len(df.columns) >= 6:
+            val_f2 = df.iloc[0, 5]
+            val_str = str(val_f2).replace('$', '').replace('L', '').replace('.', '').replace(',', '.').strip()
+            vol_total = float(val_str)
+    except Exception:
         vol_total = 0.0
-        
+
+    # Si por alguna razón F2 viene vacío, respaldamos buscando una columna de volumen
+    if vol_total == 0.0:
+        for c in df.columns:
+            if any(term in str(c).lower() for term in ['volumen', 'litros', 'cantidad', 'vol']):
+                try:
+                    vol_total = pd.to_numeric(
+                        df[c].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).str.replace('$', '', regex=False),
+                        errors='coerce'
+                    ).sum()
+                    break
+                except:
+                    pass
+
     despachos = len(df)
     return vol_total, despachos, df
 
@@ -279,7 +274,7 @@ if menu_principal == "📊 DASHBOARD":
     st.info("Vista general del rendimiento de la estación.")
 
 # ==========================================
-# 2. COMBUSTIBLES (FUNCIONAL)
+# 2. COMBUSTIBLES
 # ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
@@ -289,7 +284,6 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
     sheet_comb_name = f"combustibles_{mes_comb.lower()}_{anio_comb}"
 
-    # Cargar de nube si no está en memoria
     if mes_comb not in st.session_state[f"combustibles_{anio_comb}"] or st.session_state[f"combustibles_{anio_comb}"][mes_comb].empty:
         df_nube_comb = cargar_desde_nube(sheet_comb_name)
         if not df_nube_comb.empty:
@@ -322,7 +316,6 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             st.sidebar.success("Actualizado desde la nube.")
             st.rerun()
 
-    # Vista Principal Combustibles
     st.title(f"⛽ Combustibles - {mes_comb} ({anio_comb})")
 
     df_comb_26 = st.session_state["combustibles_2026"].get(mes_comb, pd.DataFrame())
