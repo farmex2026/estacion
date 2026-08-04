@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
+from bs4 import BeautifulSoup
+import io
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Gestión Estación YPF (Modo Lectura Nube)", layout="wide")
@@ -44,7 +46,7 @@ def cargar_desde_nube(sheet_name):
         st.warning(f"No se pudo conectar con la nube: {e}")
     return pd.DataFrame()
 
-# Función para enviar datos a Google Sheets (con limpieza total de NaN y Timestamps)
+# Función para enviar datos a Google Sheets
 def guardar_en_nube(sheet_name, df):
     try:
         if URL_NUBE and not df.empty:
@@ -65,6 +67,31 @@ def guardar_en_nube(sheet_name, df):
     except Exception as e:
         st.error(f"Error al guardar en la nube: {e}")
     return False
+
+# Lector robusto de tablas .HTM sin dependencias externas (usa BeautifulSoup nativo)
+def leer_tabla_htm_directo(archivo):
+    try:
+        contenido = archivo.getvalue().decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(contenido, "html.parser")
+        tabla = soup.find("table")
+        if not tabla:
+            return pd.DataFrame()
+        
+        rows = []
+        for tr in tabla.find_all("tr"):
+            cols = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
+            if cols:
+                rows.append(cols)
+        
+        if not rows:
+            return pd.DataFrame()
+            
+        max_len = max(len(r) for r in rows)
+        rows_padded = [r + [""] * (max_len - len(r)) for r in rows]
+        return pd.DataFrame(rows_padded[1:], columns=rows_padded[0])
+    except Exception as e:
+        st.error(f"Error al procesar el archivo HTML: {e}")
+        return pd.DataFrame()
 
 # Formateador de números estilo argentino
 def formato_arg(val, decimales=0):
@@ -125,7 +152,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
                             st.sidebar.success("¡Guardado en la nube con éxito!")
                             st.cache_data.clear()
                         else:
-                            st.sidebar.error("No se pudo guardar en la nube. Verifique el Apps Script.")
+                            st.sidebar.error("No se pudo guardar en la nube.")
         except Exception as e:
             st.sidebar.error(f"Error al leer el archivo: {e}")
 
@@ -262,7 +289,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             st.info(f"No hay registros en la nube para Combustibles 2025 - {mes_seleccionado_comb}.")
 
 # ==========================================
-# 3. TIENDA FULL (ACTUALIZADO CON BS4 PARA .HTM)
+# 3. TIENDA FULL (ACTUALIZADO CON PARSER DIRECTO)
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
@@ -287,28 +314,22 @@ elif menu_principal == "🛒 TIENDA FULL":
 
     if archivos_htm:
         for archivo_subido in archivos_htm:
-            try:
-                # Usamos flavor='bs4' para evitar el error de lxml faltante
-                tablas = pd.read_html(archivo_subido, flavor='bs4')
-                if tablas:
-                    df_subido = tablas[0]
-                    df_subido["Turno"] = turno_subida
-                    df_subido["Archivo_Origen"] = archivo_subido.name
-                    
-                    if not df_subido.empty:
-                        key_state = f"full_{anio_full}"
-                        if mes_seleccionado_full not in st.session_state[key_state]:
-                            st.session_state[key_state][mes_seleccionado_full] = pd.DataFrame()
-                        
-                        df_actual = st.session_state[key_state][mes_seleccionado_full]
-                        if df_actual.empty:
-                            st.session_state[key_state][mes_seleccionado_full] = df_subido
-                        else:
-                            st.session_state[key_state][mes_seleccionado_full] = pd.concat([df_actual, df_subido], ignore_index=True)
-                        
-                        st.sidebar.success(f"¡Archivo {archivo_subido.name} ({turno_subida}) procesado!")
-            except Exception as e:
-                st.sidebar.error(f"Error al leer el .htm: {e}")
+            df_subido = leer_tabla_htm_directo(archivo_subido)
+            if not df_subido.empty:
+                df_subido["Turno"] = turno_subida
+                df_subido["Archivo_Origen"] = archivo_subido.name
+                
+                key_state = f"full_{anio_full}"
+                if mes_seleccionado_full not in st.session_state[key_state]:
+                    st.session_state[key_state][mes_seleccionado_full] = pd.DataFrame()
+                
+                df_actual = st.session_state[key_state][mes_seleccionado_full]
+                if df_actual.empty:
+                    st.session_state[key_state][mes_seleccionado_full] = df_subido
+                else:
+                    st.session_state[key_state][mes_seleccionado_full] = pd.concat([df_actual, df_subido], ignore_index=True)
+                
+                st.sidebar.success(f"¡Archivo {archivo_subido.name} ({turno_subida}) procesado!")
 
         if st.sidebar.button("💾 Guardar Tienda Full en la Nube", key=f"btn_guardar_full_{anio_full}_{mes_seleccionado_full}"):
             df_a_guardar = st.session_state[f"full_{anio_full}"].get(mes_seleccionado_full, pd.DataFrame())
