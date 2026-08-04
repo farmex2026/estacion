@@ -49,10 +49,8 @@ def guardar_en_nube(sheet_name, df):
     try:
         if URL_NUBE and not df.empty:
             df_limpio = df.copy()
-            # Reemplaza cualquier NaN, NaT o valor nulo por un string vacío de forma segura
             df_limpio = df_limpio.astype(object).where(pd.notnull(df_limpio), "")
             
-            # Aseguramos que todo quede como texto limpio para evitar errores de JSON / NaN
             for col in df_limpio.columns:
                 df_limpio[col] = df_limpio[col].apply(lambda x: str(x) if x != "" else "")
 
@@ -93,7 +91,7 @@ if menu_principal == "📊 DASHBOARD":
     st.info("Panel de control centralizado de la estación con comparativa interanual.")
 
 # ==========================================
-# 2. COMBUSTIBLES
+# 2. COMBUSTIBLES (INTACTO)
 # ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
@@ -264,15 +262,63 @@ elif menu_principal == "⛽ COMBUSTIBLES":
             st.info(f"No hay registros en la nube para Combustibles 2025 - {mes_seleccionado_comb}.")
 
 # ==========================================
-# 3. TIENDA FULL
+# 3. TIENDA FULL (ACTUALIZADO PARA ARCHIVOS .HTM POR TURNOS)
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes")
+    st.sidebar.header("📂 Seleccionar Mes y Año")
     mes_seleccionado_full = st.sidebar.selectbox("Mes Full", meses_lista)
+    anio_full = st.sidebar.selectbox("Año Full", [2026, 2025], index=0, key="anio_full_sel")
     
+    st.sidebar.markdown("---")
+    st.sidebar.header("📥 Carga de Reportes .HTM (Turnos)")
+    turno_subida = st.sidebar.selectbox("Seleccionar Turno", ["Mañana", "Tarde"], key="turno_full_htm")
+    
+    archivos_htm = st.sidebar.file_uploader(
+        f"Subir archivos .HTM ({turno_subida}) - {mes_seleccionado_full} {anio_full}", 
+        type=["htm", "html"], 
+        accept_multiple_files=True,
+        key=f"uploader_full_htm_{anio_full}_{mes_seleccionado_full}"
+    )
+
     sheet_full_2026 = f"full_{mes_seleccionado_full.lower()}_2026"
     sheet_full_2025 = f"full_{mes_seleccionado_full.lower()}_2025"
+    sheet_full_activa = sheet_full_2026 if anio_full == 2026 else sheet_full_2025
+
+    if archivos_htm:
+        for archivo_subido in archivos_htm:
+            try:
+                tablas = pd.read_html(archivo_subido)
+                if tablas:
+                    df_subido = tablas[0]
+                    df_subido["Turno"] = turno_subida
+                    df_subido["Archivo_Origen"] = archivo_subido.name
+                    
+                    if not df_subido.empty:
+                        key_state = f"full_{anio_full}"
+                        if mes_seleccionado_full not in st.session_state[key_state]:
+                            st.session_state[key_state][mes_seleccionado_full] = pd.DataFrame()
+                        
+                        df_actual = st.session_state[key_state][mes_seleccionado_full]
+                        if df_actual.empty:
+                            st.session_state[key_state][mes_seleccionado_full] = df_subido
+                        else:
+                            st.session_state[key_state][mes_seleccionado_full] = pd.concat([df_actual, df_subido], ignore_index=True)
+                        
+                        st.sidebar.success(f"¡Archivo {archivo_subido.name} ({turno_subida}) procesado!")
+            except Exception as e:
+                st.sidebar.error(f"Error al leer el .htm: {e}")
+
+        if st.sidebar.button("💾 Guardar Tienda Full en la Nube", key=f"btn_guardar_full_{anio_full}_{mes_seleccionado_full}"):
+            df_a_guardar = st.session_state[f"full_{anio_full}"].get(mes_seleccionado_full, pd.DataFrame())
+            if not df_a_guardar.empty:
+                with st.spinner("Guardando Tienda Full en Google Sheets..."):
+                    exito = guardar_en_nube(sheet_full_activa, df_a_guardar)
+                    if exito:
+                        st.sidebar.success("¡Tienda Full guardada en la nube con éxito!")
+                        st.cache_data.clear()
+                    else:
+                        st.sidebar.error("No se pudo guardar en la nube.")
 
     if mes_seleccionado_full not in st.session_state["full_2026"] or st.session_state["full_2026"][mes_seleccionado_full].empty:
         df_nube_full_26 = cargar_desde_nube(sheet_full_2026)
@@ -284,7 +330,7 @@ elif menu_principal == "🛒 TIENDA FULL":
         if not df_nube_full_25.empty:
             st.session_state["full_2025"][mes_seleccionado_full] = df_nube_full_25
 
-    if st.sidebar.button("🔄 Actualizar Full desde la Nube"):
+    if st.sidebar.button("🔄 Actualizar Full desde la Nube", key="btn_actualizar_full_nube"):
         st.cache_data.clear()
         st.session_state["full_2026"].pop(mes_seleccionado_full, None)
         st.session_state["full_2025"].pop(mes_seleccionado_full, None)
