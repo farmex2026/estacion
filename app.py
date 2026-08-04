@@ -175,10 +175,10 @@ def procesar_turno_full(uploaded_file):
         "Cigarrillos": val_cigarros
     }, detalle_log
 
-# Procesador de Combustibles (E1 = Despachos, F1 = Litros Totales | Cuadre exacto con Otros)
+# Procesador de Combustibles (E1 = Despachos, F1 = Litros Totales con clasificación exacta)
 def procesar_combustibles_df(df):
     if df.empty:
-        return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
+        return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
     df = limpiar_columnas(df)
     
     vol_total = 0.0
@@ -222,30 +222,34 @@ def procesar_combustibles_df(df):
     for _, row in df_registros.iterrows():
         fila_texto = " ".join([str(val).lower() for val in row.values])
         
+        # Extraer números válidos de volumen (descartando precios unitarios pequeños o códigos)
         nums = []
         for val in row.values:
             val_s = str(val).replace('$', '').replace('.', '').replace(',', '.').strip()
             try:
                 num = float(val_s)
-                if num > 10:
+                if num > 50:  # Los litros de despacho siempre son mayores a 50
                     nums.append(num)
             except:
                 continue
         
+        # Tomamos el valor más razonable como volumen de esa línea
         val_fila = max(nums) if nums else 0.0
         
-        if ('super' in fila_texto or 's xxi' in fila_texto or 'nafta s' in fila_texto) and 'infinia' not in fila_texto:
-            vol_super += val_fila
-        elif 'infinia' in fila_texto and 'diesel' not in fila_texto and 'euro' not in fila_texto:
-            vol_infinia_nafta += val_fila
-        elif '500' in fila_texto or 'diesel 500' in fila_texto or 'ultra' in fila_texto:
-            vol_diesel_500 += val_fila
-        elif 'euro' in fila_texto or 'infinia diesel' in fila_texto or ('infinia' in fila_texto and 'diesel' in fila_texto):
-            vol_infinia_diesel += val_fila
-
-    # Cuadre exacto: Calculamos lo que sobra como "Otros" para que la suma cuadre exactamente con F1
-    suma_detectada = vol_super + vol_infinia_nafta + vol_diesel_500 + vol_infinia_diesel
-    vol_otros = max(0.0, vol_total - suma_detectada)
+        # Identificación precisa de productos YPF
+        es_infinia = 'infinia' in fila_texto
+        es_diesel = 'diesel' in fila_texto or 'euro' in fila_texto or 'ultra' in fila_texto or '500' in fila_texto
+        
+        if es_diesel:
+            if '500' in fila_texto or 'ultra' in fila_texto:
+                vol_diesel_500 += val_fila
+            else:
+                vol_infinia_diesel += val_fila  # Euro / Infinia Diesel
+        else:
+            if es_infinia:
+                vol_infinia_nafta += val_fila
+            else:
+                vol_super += val_fila  # Super / S XXI por defecto si no es Infinia ni Diesel
 
     total_naftas = vol_super + vol_infinia_nafta
     mix_super = (vol_super / total_naftas * 100) if total_naftas > 0 else 0.0
@@ -255,7 +259,7 @@ def procesar_combustibles_df(df):
     mix_diesel_500 = (vol_diesel_500 / total_diesel * 100) if total_diesel > 0 else 0.0
     mix_infinia_diesel = (vol_infinia_diesel / total_diesel * 100) if total_diesel > 0 else 0.0
 
-    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, vol_otros, df_registros
+    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df_registros
 
 @st.cache_data(ttl=5, show_spinner="Sincronizando con la nube...")
 def cargar_desde_nube(sheet_name):
@@ -372,10 +376,10 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     df_comb_25 = st.session_state["combustibles_2025"].get(mes_comb, pd.DataFrame())
 
     res_26 = procesar_combustibles_df(df_comb_26)
-    vol_26, desp_26, sup_26, mix_sup_26, inf_n_26, mix_inf_n_26, d500_26, mix_d500_26, inf_d_26, mix_inf_d_26, otros_26, df_proc_26 = res_26
+    vol_26, desp_26, sup_26, mix_sup_26, inf_n_26, mix_inf_n_26, d500_26, mix_d500_26, inf_d_26, mix_inf_d_26, df_proc_26 = res_26
 
     res_25 = procesar_combustibles_df(df_comb_25)
-    vol_25, desp_25, sup_25, mix_sup_25, inf_n_25, mix_inf_n_25, d500_25, mix_d500_25, inf_d_25, mix_inf_d_25, otros_25, df_proc_25 = res_25
+    vol_25, desp_25, sup_25, mix_sup_25, inf_n_25, mix_inf_n_25, d500_25, mix_d500_25, inf_d_25, mix_inf_d_25, df_proc_25 = res_25
 
     col1, col2 = st.columns(2)
     with col1:
@@ -400,11 +404,6 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("🟡 Diesel 500", f"{formato_arg(d500_26, 0)} L", delta=f"Mix: {formato_arg(mix_d500_26, 2)}%")
     with cd2:
         st.metric("🔵 Infinia Diesel", f"{formato_arg(inf_d_26, 0)} L", delta=f"Mix: {formato_arg(mix_inf_d_26, 2)}%")
-
-    if otros_26 > 0:
-        st.markdown("---")
-        st.markdown("**📦 Otros / Sin clasificar**")
-        st.metric("⚪ Otros", f"{formato_arg(otros_26, 0)} L")
 
     st.markdown("---")
     st.markdown(f"### 📋 Detalle de Registros - {anio_comb} (Sin celdas E1/F1)")
@@ -525,7 +524,7 @@ elif menu_principal == "🛒 TIENDA FULL":
     with col_f1:
         st.metric(f"☕ Bebidas Calientes", f"{formato_arg(beb_26, 2)} unid.", delta=f"{diff_beb:+.2f}% vs 2025 ({formato_arg(beb_25, 2)})")
     with col_f2:
-        st.metric(f"🍔 Comida Elaborada/Envasada", f"{formato_arg(comida_26, 2)} unid.", delta=f"{diff_comida:+.2f}% vs 2025 ({formato_arg(comida_25, 2)})")
+        st.metric(f"🍔 Comida Elaborada/Envasada", f"{formato_arg(comida_26, 2)} unid.", delta=f"{diff_comida:+.2f}% vs 2025 ({formato_arg(comida_26, 2)})")
     with col_f3:
         st.metric(f"🚬 Cigarrillos", f"{formato_arg(cigar_26, 2)} unid.", delta=f"{diff_cigar:+.2f}% vs 2025 ({formato_arg(cigar_25, 2)})")
 
@@ -551,7 +550,7 @@ elif menu_principal == "🎯 +YPF":
 
     datos_ypf_base = [
         {"Concepto": "Volumen Diesel m3", "Objetivo mínimo": 59700.0, "Objetivo máximo": 69700.0, "Real": 59394.0, "Puntos posibles": 20},
-        {"Concepto": "Volumen nafta m3", "Objetivo mínimo": 427000.0, "Objetivo máximo": 498100.0, "Real": 424652.0, "Puntos posibles": 25},
+        {"Concepto": "Volumen m3", "Objetivo mínimo": 427000.0, "Objetivo máximo": 498100.0, "Real": 424652.0, "Puntos posibles": 25},
         {"Concepto": "Mix nafta infinia", "Objetivo mínimo": 30.70, "Objetivo máximo": 35.80, "Real": 35.98, "Puntos posibles": 10},
         {"Concepto": "Crosselling", "Objetivo mínimo": 30.70, "Objetivo máximo": 37.60, "Real": 31.45, "Puntos posibles": 5},
         {"Concepto": "Unidades totales (sin tabaco)", "Objetivo mínimo": 9264.0, "Objetivo máximo": 10808.0, "Real": 9582.0, "Puntos posibles": 10},
