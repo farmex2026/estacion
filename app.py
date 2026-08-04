@@ -10,8 +10,8 @@ st.set_page_config(page_title="Gestión Estación YPF (Modo Lectura Nube)", layo
 
 # Inicialización de session_state para 2025 y 2026
 for anio in [2025, 2026]:
-    if f"full_{anio}" not in st.session_state:
-        st.session_state[f"full_{anio}"] = {}
+    if f"full_calendar_{anio}" not in st.session_state:
+        st.session_state[f"full_calendar_{anio}"] = {}
     if f"boxes_{anio}" not in st.session_state:
         st.session_state[f"boxes_{anio}"] = {}
     if f"combustibles_{anio}" not in st.session_state:
@@ -44,13 +44,12 @@ def limpiar_columnas(df):
     df.columns = cols_limpias
     return df
 
-# Función para procesar, limpiar números (formato argentino) y sumar por rubro
-def procesar_y_sumar_rubros(df):
+# Función para limpiar números y preparar el DataFrame de un turno
+def procesar_turno_full(df):
     if df.empty:
         return df
     df = limpiar_columnas(df)
-    
-    # Identificar la columna de descripción/rubro
+    # Detectar columna de rubro/concepto
     col_rubro = df.columns[0]
     for col in df.columns:
         c_low = str(col).lower()
@@ -58,25 +57,16 @@ def procesar_y_sumar_rubros(df):
             col_rubro = col
             break
     
-    # Limpiar y convertir columnas numéricas
-    cols_a_sumar = []
+    # Limpiar columnas numéricas
     for col in df.columns:
         if col == col_rubro:
             continue
         serie_str = df[col].astype(str).str.strip()
         temp_col = serie_str.str.replace('$', '', regex=False).str.replace(' ', '', regex=False)
-        # Adaptar formato de números (ej: 1.234,56 o 50,00)
         temp_col = temp_col.apply(lambda x: x.replace('.', '').replace(',', '.') if (',' in x and '.' in x) or (x.count('.') > 1) or (',' in x and x.find(',') > x.find('.')) else x.replace(',', '.'))
-        
         converted = pd.to_numeric(temp_col, errors='coerce')
         if converted.notna().sum() > 0:
             df[col] = converted.fillna(0)
-            cols_a_sumar.append(col)
-    
-    if cols_a_sumar:
-        # Agrupar por rubro sumando las columnas numéricas
-        df_agrupado = df.groupby(col_rubro, as_index=False)[cols_a_sumar].sum()
-        return df_agrupado
     return df
 
 # Función robusta con caché corto para lectura desde la nube
@@ -109,7 +99,6 @@ def guardar_en_nube(sheet_name, df):
         if URL_NUBE and not df.empty:
             df_limpio = df.copy()
             df_limpio = df_limpio.astype(object).where(pd.notnull(df_limpio), "")
-            
             for col in df_limpio.columns:
                 df_limpio[col] = df_limpio[col].apply(lambda x: str(x) if x != "" else "")
 
@@ -241,97 +230,116 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("🔢 Despachos 2026", formato_arg(desp_2026), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_2025)})")
 
 # ==========================================
-# 3. TIENDA FULL (CON PEGADO MASIVO Y SUMA DE RUBROS)
+# 3. TIENDA FULL (CALENDARIO POR DÍA Y TURNO)
 # ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.sidebar.markdown("---")
-    st.sidebar.header("📂 Seleccionar Mes y Año")
-    mes_seleccionado_full = st.sidebar.selectbox("Mes Full", meses_lista, key="mes_full_sel")
+    st.sidebar.header("📂 Configuración de Mes y Año")
+    mes_full = st.sidebar.selectbox("Mes Full", meses_lista, key="mes_full_sel")
     anio_full = st.sidebar.selectbox("Año Full", [2026, 2025], index=0, key="anio_full_sel")
-    
-    st.sidebar.markdown("---")
-    st.sidebar.header("📋 Carga por Pegado Masivo")
-    st.sidebar.info("Copiá la tabla desde tu reporte `.htm` abierto en el navegador y pegala acá abajo. El sistema sumará los rubros automáticamente.")
-    
-    texto_pegado = st.sidebar.text_area("Pegá los datos aquí (Ctrl + V)", height=150, key=f"txt_pegar_full_{anio_full}_{mes_seleccionado_full}")
-    
-    sheet_full_2026 = f"full_{mes_seleccionado_full.lower()}_2026"
-    sheet_full_2025 = f"full_{mes_seleccionado_full.lower()}_2025"
-    sheet_full_activa = sheet_full_2026 if anio_full == 2026 else sheet_full_2025
 
-    if st.sidebar.button("➕ Procesar y Sumar al Mes", key=f"btn_procesar_paste_{anio_full}_{mes_seleccionado_full}"):
-        if texto_pegado.strip():
+    sheet_full_name = f"full_calendar_{mes_full.lower()}_{anio_full}"
+
+    # Cargar datos iniciales desde nube si el session_state está vacío
+    if mes_full not in st.session_state[f"full_calendar_{anio_full}"]:
+        df_nube = cargar_desde_nube(sheet_full_name)
+        if not df_nube.empty:
+            st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_nube
+        else:
+            st.session_state[f"full_calendar_{anio_full}"][mes_full] = pd.DataFrame(columns=["Dia", "Turno", "ID_Planilla", "Rubro", "Valor"])
+
+    st.sidebar.markdown("---")
+    st.sidebar.header("📋 Carga Rápida por Día / Turno")
+    
+    dia_sel = st.sidebar.selectbox("Día del mes", list(range(1, 32)), key=f"dia_sel_{anio_full}_{mes_full}")
+    turno_sel = st.sidebar.selectbox("Turno", ["Mañana", "Tarde"], key=f"turno_sel_{anio_full}_{mes_full}")
+    id_planilla_default = f"{str(dia_sel).zfill(2)}-{mes_full.lower()}-15641"
+    id_planilla_ingresado = st.sidebar.text_input("ID / Nombre Planilla", value=id_planilla_default, key=f"id_planilla_{anio_full}_{mes_full}")
+    
+    st.sidebar.info("Copiá la tabla de tu archivo `.htm` y pegala acá abajo:")
+    texto_turno = st.sidebar.text_area("Pegar datos del turno (Ctrl + V)", height=120, key=f"txt_turno_{anio_full}_{mes_full}")
+
+    if st.sidebar.button("💾 Guardar / Actualizar este Turno", key=f"btn_guardar_turno_{anio_full}_{mes_full}"):
+        if texto_turno.strip():
             try:
-                df_pegado = pd.read_csv(io.StringIO(texto_pegado), sep=None, engine='python')
-                df_pegado = limpiar_columnas(df_pegado)
-                df_procesado = procesar_y_sumar_rubros(df_pegado)
+                df_nuevo = pd.read_csv(io.StringIO(texto_turno), sep=None, engine='python')
+                df_nuevo = procesar_turno_full(df_nuevo)
                 
-                key_state = f"full_{anio_full}"
-                if mes_seleccionado_full not in st.session_state[key_state]:
-                    st.session_state[key_state][mes_seleccionado_full] = pd.DataFrame()
+                # Transformar a formato plano (melt o filas por rubro)
+                col_rubro = df_nuevo.columns[0]
+                cols_vals = [c for c in df_nuevo.columns if c != col_rubro]
                 
-                df_actual = st.session_state[key_state][mes_seleccionado_full]
+                # Armar registros limpios
+                df_melted = pd.melt(df_nuevo, id_vars=[col_rubro], value_vars=cols_vals, var_name="Metrica", value_name="Valor")
+                df_melted.rename(columns={col_rubro: "Rubro"}, inplace=True)
+                df_melted["Dia"] = dia_sel
+                df_melted["Turno"] = turno_sel
+                df_melted["ID_Planilla"] = id_planilla_ingresado
                 
-                if df_actual.empty:
-                    st.session_state[key_state][mes_seleccionado_full] = df_procesado
+                # Asegurar valores numéricos
+                df_melted["Valor"] = pd.to_numeric(df_melted["Valor"], errors='coerce').fillna(0)
+
+                # Actualizar session_state (remover datos previos de ese mismo día y turno si existían y agregar los nuevos)
+                df_actual = st.session_state[f"full_calendar_{anio_full}"][mes_full]
+                if not df_actual.empty:
+                    # Filtrar fuera el día y turno anterior para reemplazarlo
+                    df_actual = df_actual[~((df_actual["Dia"] == dia_sel) & (df_actual["Turno"] == turno_sel))]
+                    df_combinado = pd.concat([df_actual, df_melted], ignore_index=True)
                 else:
-                    # Combinar acumulando / sumando rubros repetidos
-                    df_combinado = pd.concat([df_actual, df_procesado], ignore_index=True)
-                    st.session_state[key_state][mes_seleccionado_full] = procesar_y_sumar_rubros(df_combinado)
+                    df_combinado = df_melted
+
+                st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_combinado
                 
-                st.sidebar.success("¡Datos pegados y rubros sumados con éxito!")
+                # Guardar automáticamente en la nube
+                guardar_en_nube(sheet_full_name, df_combinado)
+                st.sidebar.success(f"¡Turno {turno_sel} del Día {dia_sel} guardado con éxito!")
             except Exception as e:
-                st.sidebar.error(f"Error al procesar el texto pegado: {e}")
+                st.sidebar.error(f"Error al procesar el turno: {e}")
         else:
             st.sidebar.warning("El cuadro de texto está vacío.")
 
-    if st.sidebar.button("🗑️ Borrar datos acumulados de este mes", key=f"btn_limpiar_full_{anio_full}_{mes_seleccionado_full}"):
-        st.session_state[f"full_{anio_full}"][mes_seleccionado_full] = pd.DataFrame()
-        st.sidebar.success("Se reiniciaron los datos de este mes.")
-        st.rerun()
-
-    if mes_seleccionado_full not in st.session_state["full_2026"] or st.session_state["full_2026"][mes_seleccionado_full].empty:
-        df_nube_full_26 = cargar_desde_nube(sheet_full_2026)
-        if not df_nube_full_26.empty:
-            st.session_state["full_2026"][mes_seleccionado_full] = df_nube_full_26
-
-    if mes_seleccionado_full not in st.session_state["full_2025"] or st.session_state["full_2025"][mes_seleccionado_full].empty:
-        df_nube_full_25 = cargar_desde_nube(sheet_full_2025)
-        if not df_nube_full_25.empty:
-            st.session_state["full_2025"][mes_seleccionado_full] = df_nube_full_25
-
-    if st.sidebar.button("🔄 Actualizar Full desde la Nube", key="btn_actualizar_full_nube"):
+    if st.sidebar.button("🔄 Recargar desde la Nube", key=f"btn_recargar_full_{anio_full}_{mes_full}"):
         st.cache_data.clear()
-        st.session_state["full_2026"].pop(mes_seleccionado_full, None)
-        st.session_state["full_2025"].pop(mes_seleccionado_full, None)
-        st.rerun()
+        df_nube = cargar_desde_nube(sheet_full_name)
+        if not df_nube.empty:
+            st.session_state[f"full_calendar_{anio_full}"][mes_full] = df_nube
+            st.sidebar.success("Datos actualizados desde la nube.")
+            st.rerun()
 
-    if st.sidebar.button("💾 Guardar Tienda Full en la Nube", key=f"btn_guardar_full_{anio_full}_{mes_seleccionado_full}"):
-        df_a_guardar = st.session_state[f"full_{anio_full}"].get(mes_seleccionado_full, pd.DataFrame())
-        if not df_a_guardar.empty:
-            with st.spinner("Guardando Tienda Full en Google Sheets..."):
-                exito = guardar_en_nube(sheet_full_activa, df_a_guardar)
-                if exito:
-                    st.sidebar.success("¡Tienda Full guardada en la nube con éxito!")
-                    st.cache_data.clear()
-                else:
-                    st.sidebar.error("No se pudo guardar en la nube.")
+    # Vista Principal de Tienda Full
+    st.title(f"🛒 Tienda Full - Calendario de Ventas ({mes_full} {anio_full})")
 
-    st.title(f"🛒 Tienda Full - {mes_seleccionado_full} (2026 vs 2025)")
-    df_rubros_26 = limpiar_columnas(st.session_state["full_2026"].get(mes_seleccionado_full, pd.DataFrame()))
-    df_rubros_25 = limpiar_columnas(st.session_state["full_2025"].get(mes_seleccionado_full, pd.DataFrame()))
+    df_mes = st.session_state[f"full_calendar_{anio_full}"].get(mes_full, pd.DataFrame())
 
-    st.markdown(f"### 📋 Tienda Full - 2026 (Consolidado)")
-    if not df_rubros_26.empty:
-        st.dataframe(df_rubros_26, use_container_width=True, hide_index=True)
+    if not df_mes.empty:
+        st.markdown("### 📅 Resumen por Día y Turno")
+        # Crear una tabla pivote para mostrar el calendario de ventas de forma clara
+        try:
+            # Agrupar por Día y Turno sumando la métrica principal o total
+            df_resumen = df_mes.groupby(["Dia", "Turno", "ID_Planilla"], as_index=False)["Valor"].sum()
+            st.dataframe(df_resumen, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.dataframe(df_mes, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros acumulados para 2026 - {mes_seleccionado_full}. Pegá los datos en la barra lateral para empezar.")
+        st.info(f"No hay turnos cargados para {mes_full} {anio_full}. Utilizá la barra lateral para cargar los turnos Día por Día.")
 
-    with st.expander(f"📂 Ver Tienda Full del año 2025 ({mes_seleccionado_full})"):
-        if not df_rubros_25.empty:
-            st.dataframe(df_rubros_25, use_container_width=True, hide_index=True)
-        else:
-            st.info(f"No hay registros de Tienda Full en la nube para 2025 - {mes_seleccionado_full}.")
+    # Comparativa rápida 2026 vs 2025 en la misma vista de Full
+    st.markdown("---")
+    st.subheader(f"📊 Comparativa Mensual Full: 2026 vs 2025 ({mes_full})")
+    
+    df_26 = st.session_state["full_calendar_2026"].get(mes_full, pd.DataFrame())
+    df_25 = st.session_state["full_calendar_2025"].get(mes_full, pd.DataFrame())
+    
+    tot_26 = df_26["Valor"].sum() if not df_26.empty and "Valor" in df_26.columns else 0
+    tot_25 = df_25["Valor"].sum() if not df_25.empty and "Valor" in df_25.columns else 0
+    
+    diff_full = ((tot_26 - tot_25) / tot_25 * 100) if tot_25 > 0 else 0
+    
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        st.metric(f"🛒 Total Full 2026 ({mes_full})", f"$ {formato_arg(tot_26, 2)}")
+    with col_f2:
+        st.metric(f"🛒 Total Full 2025 ({mes_full})", f"$ {formato_arg(tot_25, 2)}", delta=f"{diff_full:+.2f}% vs 2025")
 
 # ==========================================
 # 4. BOXES
