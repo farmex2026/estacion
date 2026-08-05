@@ -5,6 +5,22 @@ import io
 # Configuración inicial de la página
 st.set_page_config(page_title="Gestión Estación YPF", layout="wide")
 
+# Totales oficiales de venta 2025 por mes (Playa / Combustibles)
+TOTALES_2025 = {
+    "Enero": 291507.0,
+    "Febrero": 315834.0,
+    "Marzo": 381244.0,
+    "Abril": 395330.0,
+    "Mayo": 534107.0,
+    "Junio": 505966.0,
+    "Julio": 523352.0,
+    "Agosto": 524135.0,
+    "Septiembre": 499462.0,
+    "Octubre": 535096.0,
+    "Noviembre": 510923.0,
+    "Diciembre": 562513.0
+}
+
 # Inicialización de session_state para 2025 y 2026
 for anio in [2025, 2026]:
     if f"full_calendar_{anio}" not in st.session_state:
@@ -316,13 +332,21 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     st.title(f"⛽ Combustibles - {mes_comb} ({anio_comb})")
 
     df_comb_26 = st.session_state["combustibles_2026"].get(mes_comb, pd.DataFrame())
+    
+    # Obtener 2025: Si hay archivo subido lo procesa, si no, usa el total oficial precargado de la imagen
     df_comb_25 = st.session_state["combustibles_2025"].get(mes_comb, pd.DataFrame())
+    vol_25_oficial = TOTALES_2025.get(mes_comb, 0.0)
 
     res_26 = procesar_combustibles_df(df_comb_26)
     vol_26, desp_26, sup_26, mix_sup_26, inf_n_26, mix_inf_n_26, d500_26, mix_d500_26, inf_d_26, mix_inf_d_26, df_proc_26 = res_26
 
-    res_25 = procesar_combustibles_df(df_comb_25)
-    vol_25, desp_25, sup_25, mix_sup_25, inf_n_25, mix_inf_n_25, d500_25, mix_d500_25, inf_d_25, mix_inf_d_25, df_proc_25 = res_25
+    if not df_comb_25.empty:
+        res_25 = procesar_combustibles_df(df_comb_25)
+        vol_25 = res_25[0]
+        desp_25 = res_25[1]
+    else:
+        vol_25 = vol_25_oficial
+        desp_25 = 0
 
     col1, col2 = st.columns(2)
     with col1:
@@ -330,7 +354,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("📦 Volumen Total (L)", f"{formato_arg(vol_26, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_25, 0)} L)")
     with col2:
         diff_desp = ((desp_26 - desp_25) / desp_25 * 100) if desp_25 > 0 else 0
-        st.metric("🔢 Registros / Despachos", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_25)})")
+        st.metric("🔢 Registros / Despachos", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_25)})" if desp_25 > 0 else "vs 2025 (Oficial)")
 
     st.markdown("---")
     st.markdown("**🚗 Naftas**")
@@ -350,11 +374,11 @@ elif menu_principal == "⛽ COMBUSTIBLES":
 
     st.markdown("---")
     st.markdown(f"### 📋 Detalle de Registros - {anio_comb}")
-    df_activo_proc = df_proc_26 if anio_comb == 2026 else df_proc_25
+    df_activo_proc = df_proc_26 if anio_comb == 2026 else df_comb_25
     if not df_activo_proc.empty:
         st.dataframe(df_activo_proc, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de combustibles cargados para {mes_comb} {anio_comb}.")
+        st.info(f"No hay registros detallados cargados para {mes_comb} {anio_comb} (Se está utilizando el total mensual oficial de 2025: {formato_arg(vol_25_oficial, 0)} L).")
 
 elif menu_principal == "🛒 TIENDA FULL":
     st.title("🛒 Tienda Full")
