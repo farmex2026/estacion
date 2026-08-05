@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import io
-import re
-from bs4 import BeautifulSoup
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Gestión Estación YPF", layout="wide")
@@ -21,7 +19,47 @@ meses_lista = [
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ]
 
-# Precarga automática de Julio 2026 con los datos de la estación
+# Precarga automática de Junio 2026
+if "Junio" not in st.session_state["combustibles_2026"]:
+    datos_junio_2026 = [
+        ("01-06", 1617.0, 1157.0, 5418.0, 9583.0),
+        ("02-06", 932.0, 1399.0, 4545.0, 7929.0),
+        ("03-06", 891.0, 1499.0, 5679.0, 10770.0),
+        ("04-06", 1119.0, 1077.0, 5289.0, 10904.0),
+        ("05-06", 1472.0, 1256.0, 5271.0, 9514.0),
+        ("06-06", 2028.0, 729.0, 4499.0, 8741.0),
+        ("07-06", 204.0, 827.0, 3950.0, 7726.0),
+        ("08-06", 516.0, 1177.0, 4557.0, 10470.0),
+        ("09-06", 1551.0, 1278.0, 5718.0, 9175.0),
+        ("10-06", 1034.0, 1188.0, 6571.0, 11773.0),
+        ("11-06", 1152.0, 1534.0, 5819.0, 10913.0),
+        ("12-06", 2021.0, 1495.0, 5723.0, 10970.0),
+        ("13-06", 1038.0, 823.0, 4544.0, 8974.0),
+        ("14-06", 393.0, 485.0, 4236.0, 7129.0),
+        ("15-06", 300.0, 542.0, 4669.0, 7414.0),
+        ("16-06", 1163.0, 1098.0, 5400.0, 8524.0),
+        ("17-06", 712.0, 1050.0, 4980.0, 9175.0),
+        ("18-06", 1154.0, 1411.0, 4532.0, 10865.0),
+        ("19-06", 1400.0, 1420.0, 5602.0, 11701.0),
+        ("20-06", 685.0, 794.0, 5305.0, 8565.0),
+        ("21-06", 151.0, 429.0, 3999.0, 6716.0),
+        ("22-06", 739.0, 927.0, 4545.0, 8669.0),
+        ("23-06", 954.0, 1072.0, 4681.0, 9387.0),
+        ("24-06", 1973.0, 1241.0, 5039.0, 8849.0),
+        ("25-06", 764.0, 1466.0, 6059.0, 11293.0),
+        ("26-06", 1899.0, 1449.0, 6085.0, 10768.0),
+        ("27-06", 1734.0, 694.0, 4638.0, 9675.0),
+        ("28-06", 194.0, 475.0, 3669.0, 7076.0),
+        ("29-06", 1707.0, 853.0, 4513.0, 8794.0),
+        ("30-06", 627.0, 1334.0, 5096.0, 9203.0)
+    ]
+    df_junio_init = pd.DataFrame(datos_junio_2026, columns=["junio", "Diesel", "Infinia Diesel", "Infinia", "Super"])
+    df_junio_init["total"] = df_junio_init["Diesel"] + df_junio_init["Infinia Diesel"] + df_junio_init["Infinia"] + df_junio_init["Super"]
+    df_junio_init["nafta"] = df_junio_init["Infinia"] + df_junio_init["Super"]
+    df_junio_init["diesel"] = df_junio_init["Diesel"] + df_junio_init["Infinia Diesel"]
+    st.session_state["combustibles_2026"]["Junio"] = df_junio_init
+
+# Precarga automática de Julio 2026
 if "Julio" not in st.session_state["combustibles_2026"]:
     datos_julio_2026 = [
         ("01-07", 1760.0, 1208.0, 5884.0, 9886.0),
@@ -80,14 +118,11 @@ def limpiar_columnas(df):
     df.columns = cols_limpias
     return df
 
-# Lector universal robusto para HTML, Excel y CSV
 def leer_archivo_universal(uploaded_file):
     if uploaded_file is None:
         return pd.DataFrame()
-    
     nombre = uploaded_file.name.lower()
     contenido_bytes = uploaded_file.read()
-    
     if nombre.endswith(('.htm', '.html')):
         for encoding in ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']:
             try:
@@ -99,7 +134,6 @@ def leer_archivo_universal(uploaded_file):
                         return df_mas_grande
             except Exception:
                 continue
-                
     try:
         if nombre.endswith('.csv'):
             return pd.read_csv(io.BytesIO(contenido_bytes))
@@ -107,32 +141,25 @@ def leer_archivo_universal(uploaded_file):
             return pd.read_excel(io.BytesIO(contenido_bytes))
     except:
         pass
-    
     for func in [pd.read_excel, pd.read_csv]:
         try:
             uploaded_file.seek(0)
             return func(uploaded_file)
         except:
             pass
-
     return pd.DataFrame()
 
-# Procesador de Combustibles Dinámico
 def procesar_combustibles_df(df):
     if df.empty:
         return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
     df = limpiar_columnas(df)
-    
     vol_super = 0.0
     vol_infinia_nafta = 0.0
     vol_diesel_500 = 0.0
     vol_infinia_diesel = 0.0
-
     df_registros = df.copy()
-
     for _, row in df_registros.iterrows():
         fila_texto = " ".join([str(val).lower() for val in row.values])
-        
         nums = []
         for val in row.values:
             val_s = str(val).replace('$', '').replace('.', '').replace(',', '.').strip()
@@ -142,15 +169,11 @@ def procesar_combustibles_df(df):
                     nums.append(num)
             except:
                 continue
-        
         if not nums:
             continue
-        
         val_fila = max(nums) if nums else 0.0
-        
         es_infinia = 'infinia' in fila_texto
         es_diesel = 'diesel' in fila_texto or 'euro' in fila_texto or 'ultra' in fila_texto or '500' in fila_texto
-        
         if es_diesel:
             if '500' in fila_texto or 'ultra' in fila_texto:
                 vol_diesel_500 += val_fila
@@ -161,18 +184,14 @@ def procesar_combustibles_df(df):
                 vol_infinia_nafta += val_fila
             elif 'super' in fila_texto or 's xxi' in fila_texto or 'nafta' in fila_texto:
                 vol_super += val_fila
-
     vol_total = vol_super + vol_infinia_nafta + vol_diesel_500 + vol_infinia_diesel
     despachos = len(df_registros)
-
     total_naftas = vol_super + vol_infinia_nafta
     mix_super = (vol_super / total_naftas * 100) if total_naftas > 0 else 0.0
     mix_infinia_nafta = (vol_infinia_nafta / total_naftas * 100) if total_naftas > 0 else 0.0
-
     total_diesel = vol_diesel_500 + vol_infinia_diesel
     mix_diesel_500 = (vol_diesel_500 / total_diesel * 100) if total_diesel > 0 else 0.0
     mix_infinia_diesel = (vol_infinia_diesel / total_diesel * 100) if total_diesel > 0 else 0.0
-
     return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df_registros
 
 def formato_arg(val, decimales=0):
@@ -185,26 +204,19 @@ def formato_arg(val, decimales=0):
     except:
         return str(val)
 
-# Menú principal
 menu_principal = st.sidebar.selectbox(
     "Menú Principal", 
     ["📊 DASHBOARD", "⛽ COMBUSTIBLES", "🛒 TIENDA FULL", "📦 BOXES", "🎯 +YPF"]
 )
 
-# ==========================================
-# 1. DASHBOARD
-# ==========================================
 if menu_principal == "📊 DASHBOARD":
     st.title("📊 Dashboard General (2026 vs 2025)")
     st.info("Vista general del rendimiento de la estación.")
 
-# ==========================================
-# 2. COMBUSTIBLES
-# ==========================================
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Configuración Combustibles")
-    mes_comb = st.sidebar.selectbox("Mes Combustibles", meses_lista, index=6, key="mes_comb_sel") # Julio por defecto
+    mes_comb = st.sidebar.selectbox("Mes Combustibles", meses_lista, index=5, key="mes_comb_sel") # Junio por defecto
     anio_comb = st.sidebar.selectbox("Año Destino", [2026, 2025], index=0, key="anio_comb_sel")
 
     st.sidebar.markdown("---")
@@ -239,7 +251,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     col1, col2 = st.columns(2)
     with col1:
         diff_vol = ((vol_26 - vol_25) / vol_25 * 100) if vol_25 > 0 else 0
-        st.metric("📦 Volumen Total (L) (Suma exacta)", f"{formato_arg(vol_26, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_25, 0)} L)")
+        st.metric("📦 Volumen Total (L)", f"{formato_arg(vol_26, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_25, 0)} L)")
     with col2:
         diff_desp = ((desp_26 - desp_25) / desp_25 * 100) if desp_25 > 0 else 0
         st.metric("🔢 Registros / Despachos", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_25)})")
@@ -266,25 +278,16 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     if not df_activo_proc.empty:
         st.dataframe(df_activo_proc, use_container_width=True, hide_index=True)
     else:
-        st.info(f"No hay registros de combustibles cargados para {mes_comb} {anio_comb}. Subí un archivo desde la barra lateral.")
+        st.info(f"No hay registros de combustibles cargados para {mes_comb} {anio_comb}.")
 
-# ==========================================
-# 3. TIENDA FULL
-# ==========================================
 elif menu_principal == "🛒 TIENDA FULL":
     st.title("🛒 Tienda Full")
     st.info("Módulo de gestión y turnos de Tienda Full.")
 
-# ==========================================
-# 4. BOXES
-# ==========================================
 elif menu_principal == "📦 BOXES":
     st.title("📦 BOXES")
     st.info("Módulo de Boxes e inventario.")
 
-# ==========================================
-# 5. TABLERO YPF
-# ==========================================
 elif menu_principal == "🎯 +YPF":
     st.title("🎯 Tablero de Exigencias YPF")
     st.info("Módulo de cumplimiento y objetivos.")
