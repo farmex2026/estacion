@@ -3,36 +3,29 @@ import streamlit as st
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Control de Combustibles YPF - Julio 2026", layout="wide"
+    page_title="Control de Combustibles YPF", layout="wide"
 )
 
-st.title("⛽ Detalle de Registros - Julio 2026")
+st.title("⛽ Control de Combustibles YPF")
 
-# Datos de la tabla
-data_tabla = [
-    ("22-07", 333, 830, 4702, 8891),
-    ("23-07", 929, 1210, 5926, 9516),
-    ("24-07", 787, 1376, 4984, 9747),
-    ("25-07", 1288, 848.8, 4594, 8334),
-    ("26-07", 152, 861.19, 3892, 6716),
-    ("27-07", 1248, 882.23, 3782, 7511),
-    ("28-07", 622, 1113, 5123, 8511),
-    ("29-07", 700, 1248, 4026, 8863),
-    ("30-07", 513, 1386, 4932, 8669),
-    ("31-07", 1246, 1287, 5502, 9710),
-]
+# 1. Selector de Meses en la parte superior
+meses_disponibles = ["Julio 2026", "Junio 2026", "Mayo 2026", "Abril 2026"]
+mes_seleccionado = st.selectbox("Seleccionar Mes:", meses_disponibles)
 
-df_tabla = pd.DataFrame(
-    data_tabla, columns=["Fecha", "Diesel", "Infinia Diesel", "Infinia", "Super"]
-)
+st.markdown(f"### 📊 Resumen, Mix y Proyecciones — {mes_seleccionado}")
 
-# 1. Tabla de registros nativa de Streamlit (limpia y con scroll automático)
-st.markdown("### 📋 Registros Diario")
-st.dataframe(df_tabla, use_container_width=True, hide_index=True)
+# 2. Métricas Principales (Arriba)
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+  st.metric(label="Acumulado / Total 2026 (Mes actual)", value="480.998 L")
+with col_b:
+  st.metric(label="Promedio Diario Total", value="15.516 L/día")
+with col_c:
+  st.metric(label="Año 2025 (Comparativa)", value="523.352 L")
 
-st.markdown("### 📊 Resumen, Mix y Proyecciones")
+st.markdown("<br>", unsafe_allow_html=True)
 
-# 2. Tarjetas de Nafta y Diesel organizadas en columnas
+# 3. Tarjetas de Nafta y Diesel organizadas en columnas
 col1, col2 = st.columns(2)
 
 with col1:
@@ -67,11 +60,23 @@ with col2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3. Métricas Generales y Comparativa 2025 vs 2026
-col3, col4, col5 = st.columns(3)
-with col3:
-  st.metric(label="Promedio Diario Total", value="15.516 L/día")
-with col4:
-  st.metric(label="Proyección Total Mes", value="480.998 L")
-with col5:
-  st.metric(label="Año 2025", value="523.352 L")
+# 4. Datos de las ventas diarias (Abajo)
+data_tabla = [
+    ("22-07", 333, 830, 4702, 8891),
+    ("23-07", 929, 1210, 5926, 9516),
+    ("24-07", 787, 1376, 4984, 9747),
+    ("25-07", 1288, 848.8, 4594, 8334),
+    ("26-07", 152, 861.19, 3892, 6716),
+    ("27-07", 1248, 882.23, 3782, 7511),
+    ("28-07", 622, 1113, 5123, 8511),
+    ("29-07", 700, 1248, 4026, 8863),
+    ("30-07", 513, 1386, 4932, 8669),
+    ("31-07", 1246, 1287, 5502, 9710),
+]
+
+df_tabla = pd.DataFrame(
+    data_tabla, columns=["Fecha", "Diesel", "Infinia Diesel", "Infinia", "Super"]
+)
+
+st.markdown("### 📋 Detalle de Registros Diarios")
+st.dataframe(df_tabla, use_container_width=True, hide_index=True)
