@@ -53,10 +53,7 @@ if "Junio" not in st.session_state["combustibles_2026"]:
         ("29-06", 1707.0, 853.0, 4513.0, 8794.0),
         ("30-06", 627.0, 1334.0, 5096.0, 9203.0)
     ]
-    df_junio_init = pd.DataFrame(datos_junio_2026, columns=["junio", "Diesel", "Infinia Diesel", "Infinia", "Super"])
-    df_junio_init["total"] = df_junio_init["Diesel"] + df_junio_init["Infinia Diesel"] + df_junio_init["Infinia"] + df_junio_init["Super"]
-    df_junio_init["nafta"] = df_junio_init["Infinia"] + df_junio_init["Super"]
-    df_junio_init["diesel"] = df_junio_init["Diesel"] + df_junio_init["Infinia Diesel"]
+    df_junio_init = pd.DataFrame(datos_junio_2026, columns=["Fecha", "Diesel", "Infinia Diesel", "Infinia", "Super"])
     st.session_state["combustibles_2026"]["Junio"] = df_junio_init
 
 # Precarga automática de Julio 2026
@@ -94,10 +91,7 @@ if "Julio" not in st.session_state["combustibles_2026"]:
         ("30-07", 513.0, 1386.0, 4932.0, 8669.0),
         ("31-07", 1246.0, 1287.0, 5502.0, 9710.0)
     ]
-    df_julio_init = pd.DataFrame(datos_julio_2026, columns=["julio", "Diesel", "Infinia Diesel", "Infinia", "Super"])
-    df_julio_init["total"] = df_julio_init["Diesel"] + df_julio_init["Infinia Diesel"] + df_julio_init["Infinia"] + df_julio_init["Super"]
-    df_julio_init["nafta"] = df_julio_init["Infinia"] + df_julio_init["Super"]
-    df_julio_init["diesel"] = df_julio_init["Diesel"] + df_julio_init["Infinia Diesel"]
+    df_julio_init = pd.DataFrame(datos_julio_2026, columns=["Fecha", "Diesel", "Infinia Diesel", "Infinia", "Super"])
     st.session_state["combustibles_2026"]["Julio"] = df_julio_init
 
 def limpiar_columnas(df):
@@ -152,47 +146,72 @@ def leer_archivo_universal(uploaded_file):
 def procesar_combustibles_df(df):
     if df.empty:
         return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
+    
     df = limpiar_columnas(df)
+    cols_lower = [str(c).lower().strip() for c in df.columns]
+    
     vol_super = 0.0
     vol_infinia_nafta = 0.0
     vol_diesel_500 = 0.0
     vol_infinia_diesel = 0.0
-    df_registros = df.copy()
-    for _, row in df_registros.iterrows():
-        fila_texto = " ".join([str(val).lower() for val in row.values])
-        nums = []
-        for val in row.values:
-            val_s = str(val).replace('$', '').replace('.', '').replace(',', '.').strip()
-            try:
-                num = float(val_s)
-                if num > 0:
-                    nums.append(num)
-            except:
+    despachos = len(df)
+    
+    # 1. VERIFICAMOS SI LA TABLA YA TIENE LAS COLUMNAS ORDENADAS (Ej: Nuestra carga manual)
+    es_formato_columnas = any(c in cols_lower for c in ['super', 'diesel', 'infinia'])
+    
+    if es_formato_columnas:
+        for col_orig, col_low in zip(df.columns, cols_lower):
+            if col_low == 'super' or 's xxi' in col_low:
+                vol_super += pd.to_numeric(df[col_orig], errors='coerce').fillna(0).sum()
+            elif col_low == 'infinia diesel' or 'infinia d' in col_low:
+                vol_infinia_diesel += pd.to_numeric(df[col_orig], errors='coerce').fillna(0).sum()
+            elif col_low == 'infinia' or col_low == 'infinia nafta':
+                vol_infinia_nafta += pd.to_numeric(df[col_orig], errors='coerce').fillna(0).sum()
+            elif col_low == 'diesel' or col_low == 'diesel 500' or col_low == 'd500':
+                vol_diesel_500 += pd.to_numeric(df[col_orig], errors='coerce').fillna(0).sum()
+    else:
+        # 2. SI NO, INTENTAMOS LEER EL REPORTE CRUDO BUSCANDO EN LAS FILAS
+        df_registros = df.copy()
+        for _, row in df_registros.iterrows():
+            fila_texto = " ".join([str(val).lower() for val in row.values])
+            nums = []
+            for val in row.values:
+                val_s = str(val).replace('$', '').replace('.', '').replace(',', '.').strip()
+                try:
+                    num = float(val_s)
+                    if num > 0:
+                        nums.append(num)
+                except:
+                    continue
+            if not nums:
                 continue
-        if not nums:
-            continue
-        val_fila = max(nums) if nums else 0.0
-        es_infinia = 'infinia' in fila_texto
-        es_diesel = 'diesel' in fila_texto or 'euro' in fila_texto or 'ultra' in fila_texto or '500' in fila_texto
-        if es_diesel:
-            if '500' in fila_texto or 'ultra' in fila_texto:
-                vol_diesel_500 += val_fila
+            val_fila = max(nums) if nums else 0.0
+            
+            es_infinia = 'infinia' in fila_texto
+            es_diesel = 'diesel' in fila_texto or 'euro' in fila_texto or 'ultra' in fila_texto or '500' in fila_texto
+            
+            if es_diesel:
+                if '500' in fila_texto or 'ultra' in fila_texto:
+                    vol_diesel_500 += val_fila
+                else:
+                    vol_infinia_diesel += val_fila
             else:
-                vol_infinia_diesel += val_fila
-        else:
-            if es_infinia:
-                vol_infinia_nafta += val_fila
-            elif 'super' in fila_texto or 's xxi' in fila_texto or 'nafta' in fila_texto:
-                vol_super += val_fila
+                if es_infinia:
+                    vol_infinia_nafta += val_fila
+                elif 'super' in fila_texto or 's xxi' in fila_texto or 'nafta' in fila_texto:
+                    vol_super += val_fila
+                    
+    # CÁLCULOS FINALES
     vol_total = vol_super + vol_infinia_nafta + vol_diesel_500 + vol_infinia_diesel
-    despachos = len(df_registros)
     total_naftas = vol_super + vol_infinia_nafta
     mix_super = (vol_super / total_naftas * 100) if total_naftas > 0 else 0.0
     mix_infinia_nafta = (vol_infinia_nafta / total_naftas * 100) if total_naftas > 0 else 0.0
+    
     total_diesel = vol_diesel_500 + vol_infinia_diesel
     mix_diesel_500 = (vol_diesel_500 / total_diesel * 100) if total_diesel > 0 else 0.0
     mix_infinia_diesel = (vol_infinia_diesel / total_diesel * 100) if total_diesel > 0 else 0.0
-    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df_registros
+    
+    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df
 
 def formato_arg(val, decimales=0):
     try:
@@ -216,7 +235,8 @@ if menu_principal == "📊 DASHBOARD":
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
     st.sidebar.header("📂 Configuración Combustibles")
-    mes_comb = st.sidebar.selectbox("Mes Combustibles", meses_lista, index=5, key="mes_comb_sel") # Junio por defecto
+    # Lo dejamos en Julio por defecto para que lo veas apenas cargue
+    mes_comb = st.sidebar.selectbox("Mes Combustibles", meses_lista, index=6, key="mes_comb_sel") 
     anio_comb = st.sidebar.selectbox("Año Destino", [2026, 2025], index=0, key="anio_comb_sel")
 
     st.sidebar.markdown("---")
