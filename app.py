@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import calendar
 
 # Configuración inicial de la página
 st.set_page_config(page_title="Gestión Estación YPF", layout="wide")
@@ -34,6 +35,15 @@ meses_lista = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ]
+
+def dias_en_mes(nombre_mes, anio=2026):
+    meses_dict = {
+        "Enero": 1, "Febrero": 2, "Marzo": 3, "Abril": 4,
+        "Mayo": 5, "Junio": 6, "Julio": 7, "Agosto": 8,
+        "Septiembre": 9, "Octubre": 10, "Noviembre": 11, "Diciembre": 12
+    }
+    m = meses_dict.get(nombre_mes, 1)
+    return calendar.monthrange(anio, m)[1]
 
 # ==========================================
 # PRECARGA EXACTA DE DATOS 2026 (Enero a Julio)
@@ -220,9 +230,9 @@ def leer_archivo_universal(uploaded_file):
             pass
     return pd.DataFrame()
 
-def procesar_combustibles_df(df):
+def procesar_combustibles_df(df, nombre_mes="Enero", anio=2026):
     if df.empty:
-        return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df
+        return 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, df, 0.0
     
     df.columns = [str(c).strip() for c in df.columns]
     cols_map = {c.lower(): c for c in df.columns}
@@ -284,7 +294,12 @@ def procesar_combustibles_df(df):
     mix_diesel_500 = (vol_diesel_500 / total_diesel * 100) if total_diesel > 0 else 0.0
     mix_infinia_diesel = (vol_infinia_diesel / total_diesel * 100) if total_diesel > 0 else 0.0
     
-    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df
+    # Cálculo de Proyección Mensual
+    dias_totales = dias_en_mes(nombre_mes, anio)
+    promedio_diario = (vol_total / despachos) if despachos > 0 else 0.0
+    vol_proyectado = promedio_diario * dias_totales
+    
+    return vol_total, despachos, vol_super, mix_super, vol_infinia_nafta, mix_infinia_nafta, vol_diesel_500, mix_diesel_500, vol_infinia_diesel, mix_infinia_diesel, df, vol_proyectado
 
 def formato_arg(val, decimales=0):
     try:
@@ -302,8 +317,47 @@ menu_principal = st.sidebar.selectbox(
 )
 
 if menu_principal == "📊 DASHBOARD":
-    st.title("📊 Dashboard General (2026 vs 2025)")
-    st.info("Vista general del rendimiento de la estación.")
+    st.title("📊 Dashboard General (2026 vs 2025) y Proyecciones")
+    st.markdown("Resumen consolidado y proyecciones mensuales estimadas para todos los meses de 2026.")
+    
+    # Tabla resumen anual con proyecciones para todos los meses
+    data_resumen = []
+    tot_vol_2026_acum = 0.0
+    tot_vol_2025_acum = 0.0
+    
+    for m in meses_lista:
+        df_m = st.session_state["combustibles_2026"].get(m, pd.DataFrame())
+        vol_real_m = 0.0
+        proj_m = 0.0
+        if not df_m.empty:
+            res_m = procesar_combustibles_df(df_m, nombre_mes=m, anio=2026)
+            vol_real_m = res_m[0]
+            proj_m = res_m[11]
+            tot_vol_2026_acum += vol_real_m
+        
+        vol_25_m = TOTALES_2025.get(m, 0.0)
+        tot_vol_2025_acum += vol_25_m
+        
+        # Si no hay datos detallados para el mes pero hay un estimado o proyección basada en 2025 o promedio
+        if proj_m == 0.0:
+            proj_m = vol_25_m * 1.05 # Estimación conservadora si no hay datos cargados aún
+            
+        data_resumen.append({
+            "Mes": m,
+            "Volumen Real 2026 (L)": vol_real_m,
+            "Proyección Mensual 2026 (L)": proj_m,
+            "Volumen 2025 (Oficial) (L)": vol_25_m
+        })
+        
+    df_resumen_anual = pd.DataFrame(data_resumen)
+    
+    st.markdown("### 📈 Tabla Resumen y Proyección por Mes (2026)")
+    # Mostrar con formato legible
+    st.dataframe(df_resumen_anual.style.format({
+        "Volumen Real 2026 (L)": "{:,.0f}",
+        "Proyección Mensual 2026 (L)": "{:,.0f}",
+        "Volumen 2025 (Oficial) (L)": "{:,.0f}"
+    }), use_container_width=True, hide_index=True)
 
 elif menu_principal == "⛽ COMBUSTIBLES":
     st.sidebar.markdown("---")
@@ -332,29 +386,29 @@ elif menu_principal == "⛽ COMBUSTIBLES":
     st.title(f"⛽ Combustibles - {mes_comb} ({anio_comb})")
 
     df_comb_26 = st.session_state["combustibles_2026"].get(mes_comb, pd.DataFrame())
-    
-    # Obtener 2025: Si hay archivo subido lo procesa, si no, usa el total oficial precargado de la imagen
     df_comb_25 = st.session_state["combustibles_2025"].get(mes_comb, pd.DataFrame())
     vol_25_oficial = TOTALES_2025.get(mes_comb, 0.0)
 
-    res_26 = procesar_combustibles_df(df_comb_26)
-    vol_26, desp_26, sup_26, mix_sup_26, inf_n_26, mix_inf_n_26, d500_26, mix_d500_26, inf_d_26, mix_inf_d_26, df_proc_26 = res_26
+    res_26 = procesar_combustibles_df(df_comb_26, nombre_mes=mes_comb, anio=2026)
+    vol_26, desp_26, sup_26, mix_sup_26, inf_n_26, mix_inf_n_26, d500_26, mix_d500_26, inf_d_26, mix_inf_d_26, df_proc_26, proj_26 = res_26
 
     if not df_comb_25.empty:
-        res_25 = procesar_combustibles_df(df_comb_25)
+        res_25 = procesar_combustibles_df(df_comb_25, nombre_mes=mes_comb, anio=2025)
         vol_25 = res_25[0]
         desp_25 = res_25[1]
     else:
         vol_25 = vol_25_oficial
         desp_25 = 0
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         diff_vol = ((vol_26 - vol_25) / vol_25 * 100) if vol_25 > 0 else 0
-        st.metric("📦 Volumen Total (L)", f"{formato_arg(vol_26, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_25, 0)} L)")
+        st.metric("📦 Volumen Acumulado (L)", f"{formato_arg(vol_26, 0)} L", delta=f"{diff_vol:+.2f}% vs 2025 ({formato_arg(vol_25, 0)} L)")
     with col2:
+        st.metric(f"🔮 Proyección Total Mes ({mes_comb})", f"{formato_arg(proj_26, 0)} L", delta=f"Días del mes: {dias_en_mes(mes_comb, anio_comb)}")
+    with col3:
         diff_desp = ((desp_26 - desp_25) / desp_25 * 100) if desp_25 > 0 else 0
-        st.metric("🔢 Registros / Despachos", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025 ({formato_arg(desp_25)})" if desp_25 > 0 else "vs 2025 (Oficial)")
+        st.metric("🔢 Registros / Despachos", formato_arg(desp_26), delta=f"{diff_desp:+.2f}% vs 2025" if desp_25 > 0 else "vs 2025 (Oficial)")
 
     st.markdown("---")
     st.markdown("**🚗 Naftas**")
@@ -373,7 +427,7 @@ elif menu_principal == "⛽ COMBUSTIBLES":
         st.metric("🔵 Infinia Diesel", f"{formato_arg(inf_d_26, 0)} L", delta=f"Mix: {formato_arg(mix_inf_d_26, 2)}%")
 
     st.markdown("---")
-    st.markdown(f"### 📋 Detalle de Registros - {anio_comb}")
+    st.markdown(f"### 📋 Detalle de Registros - {mes_comb} {anio_comb}")
     df_activo_proc = df_proc_26 if anio_comb == 2026 else df_comb_25
     if not df_activo_proc.empty:
         st.dataframe(df_activo_proc, use_container_width=True, hide_index=True)
