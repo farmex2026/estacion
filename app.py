@@ -1,29 +1,343 @@
 """
 VENTAS DE COMBUSTIBLE Y TIENDA FULL — FARMEX
-Reescritura en Python/Streamlit del artefacto original de Claude.
+Todo en un solo archivo para evitar problemas de despliegue.
 Desarrollado por Lucas Sellecchia.
 """
 from __future__ import annotations
 
-from datetime import date
+import re
+import sqlite3
+import uuid
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from openpyxl import load_workbook
 
-import storage
-from parsers import (
-    GRUPO_LABEL,
-    GRUPOS_TIENDA,
-    PRODUCTOS,
-    TURNOS,
-    TURNOS_TIENDA,
-    categoria_grupo,
-    parse_combustible_csv,
-    parse_combustible_xlsx,
-    parse_tienda_csv,
-    parse_tienda_htm,
-)
+# ============================================================================
+# STORAGE
+# ============================================================================
+
+DB_PATH = Path(__file__).parent / "estacion_data.db"
+
+
+def get_conn():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS combustible (
+            id TEXT PRIMARY KEY,
+            fecha TEXT NOT NULL,
+            turno TEXT NOT NULL,
+            producto TEXT NOT NULL,
+            litros REAL NOT NULL,
+            importe REAL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tienda (
+            id TEXT PRIMARY KEY,
+            fecha TEXT NOT NULL,
+            turno TEXT NOT NULL,
+            categoria TEXT NOT NULL,
+            importe REAL DEFAULT 0,
+            cantidad REAL DEFAULT 0
+        )
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def load_combustible() -> pd.DataFrame:
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT * FROM combustible", conn)
+    conn.close()
+    return df
+
+
+def load_tienda() -> pd.DataFrame:
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT * FROM tienda", conn)
+    conn.close()
+    return df
+
+
+def insert_combustible(rows: list[dict]) -> tuple[int, int]:
+    """Inserta filas nuevas, ignorando duplicados por (fecha, turno, producto)."""
+    if not rows:
+        return 0, 0
+    existing = load_combustible()
+    existing_keys = (
+        set(zip(existing["fecha"], existing["turno"], existing["producto"]))
+        if not existing.empty
+        else set()
+    )
+    conn = get_conn()
+    cur = conn.cursor()
+    added, skipped, seen = 0, 0, set()
+    for r in rows:
+        key = (r["fecha"], r["turno"], r["producto"])
+        if key in existing_keys or key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        cur.execute(
+            "INSERT INTO combustible (id, fecha, turno, producto, litros, importe) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), r["fecha"], r["turno"], r["producto"], r["litros"], r.get("importe", 0)),
+        )
+        added += 1
+    conn.commit()
+    conn.close()
+    return added, skipped
+
+
+def insert_tienda(rows: list[dict]) -> tuple[int, int]:
+    """Inserta filas nuevas, ignorando duplicados por (fecha, turno, categoria)."""
+    if not rows:
+        return 0, 0
+    existing = load_tienda()
+    existing_keys = (
+        set(zip(existing["fecha"], existing["turno"], existing["categoria"]))
+        if not existing.empty
+        else set()
+    )
+    conn = get_conn()
+    cur = conn.cursor()
+    added, skipped, seen = 0, 0, set()
+    for r in rows:
+        key = (r["fecha"], r["turno"], r["categoria"])
+        if key in existing_keys or key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        cur.execute(
+            "INSERT INTO tienda (id, fecha, turno, categoria, importe, cantidad) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), r["fecha"], r["turno"], r["categoria"], r.get("importe", 0), r.get("cantidad", 0)),
+        )
+        added += 1
+    conn.commit()
+    conn.close()
+    return added, skipped
+
+
+def delete_combustible_ids(ids: list[str]):
+    if not ids:
+        return
+    conn = get_conn()
+    conn.executemany("DELETE FROM combustible WHERE id = ?", [(i,) for i in ids])
+    conn.commit()
+    conn.close()
+
+
+def delete_tienda_ids(ids: list[str]):
+    if not ids:
+        return
+    conn = get_conn()
+    conn.executemany("DELETE FROM tienda WHERE id = ?", [(i,) for i in ids])
+    conn.commit()
+    conn.close()
+
+
+# ============================================================================
+# PARSERS
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Combustible
+# ---------------------------------------------------------------------------
+
+RAW_PRODUCT_MAP = {
+    "NAFTA SUPER": "Nafta Súper",
+    "DIESEL 500": "Diesel 500",
+    "INFINIA NAFTA": "Infinia",
+    "INFINIA DIESEL": "Infinia Diesel",
+}
+RAW_TURNO_MAP = {"1": "Noche", "2": "Mañana", "3": "Tarde"}
+RAW_DATE_RE = re.compile(r"(\d{2})/(\d{2})/(\d{4})\s*\((\d)\)")
+
+PRODUCTOS = ["Nafta Súper", "Infinia", "Diesel 500", "Infinia Diesel"]
+TURNOS = ["Mañana", "Tarde", "Noche"]
+
+
+def parse_combustible_xlsx(file) -> list[dict]:
+    """Lee la planilla cruda del aforador (mismo formato que siempre subís)."""
+    wb = load_workbook(file, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+
+    header_idx = None
+    for i, row in enumerate(rows):
+        if row and any(str(c or "").strip().lower() == "fecha apertura" for c in row):
+            header_idx = i
+            break
+    if header_idx is None:
+        return []
+
+    headers = [str(c or "").strip().upper() for c in rows[header_idx]]
+    col_idx = {key: headers.index(key) for key in RAW_PRODUCT_MAP if key in headers}
+
+    result = []
+    for row in rows[header_idx + 1 :]:
+        if not row or all(c is None for c in row):
+            continue
+        m = RAW_DATE_RE.search(str(row[0] or ""))
+        if not m:
+            continue
+        dd, mm, yyyy, turno_n = m.groups()
+        fecha = f"{yyyy}-{mm}-{dd}"
+        turno = RAW_TURNO_MAP.get(turno_n, "Mañana")
+        for raw_col, producto in RAW_PRODUCT_MAP.items():
+            idx = col_idx.get(raw_col)
+            if idx is None or idx >= len(row):
+                continue
+            try:
+                val = float(row[idx])
+            except (TypeError, ValueError):
+                continue
+            if not val:
+                continue
+            result.append({"fecha": fecha, "turno": turno, "producto": producto, "litros": val, "importe": 0})
+    return result
+
+
+def parse_combustible_csv(file) -> tuple[list[dict], int]:
+    df = pd.read_csv(file)
+    df.columns = [c.strip().lower() for c in df.columns]
+    turnos_validos = {t.lower(): t for t in TURNOS}
+    productos_validos = {p.lower(): p for p in PRODUCTOS}
+    result, errors = [], 0
+    for _, r in df.iterrows():
+        fecha = str(r.get("fecha", "")).strip()
+        turno = turnos_validos.get(str(r.get("turno", "")).strip().lower())
+        producto = productos_validos.get(str(r.get("producto", "")).strip().lower())
+        try:
+            litros = float(r.get("litros"))
+        except (TypeError, ValueError):
+            errors += 1
+            continue
+        try:
+            importe = float(r.get("importe", 0) or 0)
+        except (TypeError, ValueError):
+            importe = 0
+        if not fecha or not turno or not producto:
+            errors += 1
+            continue
+        result.append({"fecha": fecha, "turno": turno, "producto": producto, "litros": litros, "importe": importe})
+    return result, errors
+
+
+# ---------------------------------------------------------------------------
+# Tienda Full
+# ---------------------------------------------------------------------------
+
+TURNOS_TIENDA = ["Mañana", "Tarde"]
+
+
+def normalize_tienda_turno(raw: str):
+    s = re.sub(r"[.\s]", "", str(raw or "").strip().lower())
+    if s == "tm" or s.startswith("mañ") or s.startswith("man"):
+        return "Mañana"
+    if s == "tt" or s.startswith("tar"):
+        return "Tarde"
+    return None
+
+
+def categoria_grupo(categoria: str):
+    c = categoria or ""
+    if re.match(r"^comidas?\s*(envasad|elaborad)", c, re.I):
+        return "comida"
+    if re.match(r"^bebidas?\s*calient", c, re.I):
+        return "cafe"
+    if re.match(r"^bebidas?\s*sin\s*alc", c, re.I):
+        return "bebida"
+    if re.match(r"^cigarrill", c, re.I):
+        return "cigarrillos"
+    return None
+
+
+GRUPOS_TIENDA = ["comida", "cafe", "bebida", "cigarrillos"]
+GRUPO_LABEL = {"comida": "Comida", "cafe": "Café", "bebida": "Bebida", "cigarrillos": "Cigarrillos"}
+
+_RUBRO_RE = re.compile(r"^(\d{2}-\d{3})\s+(\S.*?)\s{2,}(-?[\d.]+,\d+)\s+(-?[\d.]+,\d+)\s*$")
+_FONT_RE = re.compile(r"<FONT[^>]*>([^<]*)</FONT>", re.I)
+
+
+def parse_tienda_htm(file, filename: str) -> tuple[list[dict], str | None]:
+    """Lee el reporte 'Cierre de Caja' (.htm). El turno sale del nombre del
+    archivo (debe terminar en TM o TT) y la fecha se busca dentro del reporte."""
+    raw = file.read()
+    if isinstance(raw, bytes):
+        raw = raw.decode("windows-1252", errors="replace")
+    lines = [m.strip() for m in _FONT_RE.findall(raw)]
+    full_text = "\n".join(lines)
+
+    base = re.sub(r"\.[^.]+$", "", filename).upper()
+    turno = None
+    if re.search(r"(^|[^A-Z])TM$", base):
+        turno = "Mañana"
+    elif re.search(r"(^|[^A-Z])TT$", base):
+        turno = "Tarde"
+    if not turno:
+        return [], f"{filename}: no pude reconocer el turno por el nombre (debe terminar en TM o TT)."
+
+    date_match = re.search(r"(\d{2})/(\d{2})/(\d{4})", full_text)
+    if not date_match:
+        return [], f"{filename}: no encontré una fecha dentro del reporte."
+    dd, mm, yyyy = date_match.groups()
+    fecha = f"{yyyy}-{mm}-{dd}"
+
+    result = []
+    for line in lines:
+        m = _RUBRO_RE.match(line)
+        if not m:
+            continue
+        categoria = m.group(2).strip()
+        try:
+            cantidad = int(m.group(3).split(",")[0].replace(".", ""))
+        except ValueError:
+            cantidad = 0
+        importe = float(m.group(4).replace(".", "").replace(",", "."))
+        result.append(
+            {"fecha": fecha, "turno": turno, "categoria": categoria, "importe": importe, "cantidad": cantidad}
+        )
+    if not result:
+        return [], f'{filename}: no encontré rubros para importar. Revisá que sea un reporte "Cierre de Caja".'
+    return result, None
+
+
+def parse_tienda_csv(file) -> tuple[list[dict], int]:
+    df = pd.read_csv(file)
+    df.columns = [c.strip().lower() for c in df.columns]
+    result, errors = [], 0
+    for _, r in df.iterrows():
+        fecha = str(r.get("fecha", "")).strip()
+        turno = normalize_tienda_turno(r.get("turno", ""))
+        categoria = str(r.get("categoria", r.get("producto", ""))).strip()
+        try:
+            importe = float(r.get("importe"))
+        except (TypeError, ValueError):
+            errors += 1
+            continue
+        try:
+            cantidad = float(r.get("cantidad", 0) or 0)
+        except (TypeError, ValueError):
+            cantidad = 0
+        if not fecha or not turno or not categoria:
+            errors += 1
+            continue
+        result.append({"fecha": fecha, "turno": turno, "categoria": categoria, "importe": importe, "cantidad": cantidad})
+    return result, errors
+
+
+# ============================================================================
+# APP
+# ============================================================================
+
+from datetime import date
 
 CLAVE_BORRADO = "Ingreso01"
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -217,7 +531,7 @@ with section[0]:
                     errors = 0
                 else:
                     rows, errors = parse_combustible_csv(f)
-                added, skipped = storage.insert_combustible(rows)
+                added, skipped = insert_combustible(rows)
                 total_added += added
                 total_skipped += skipped
                 total_errors += errors
@@ -240,14 +554,14 @@ with section[0]:
                 litros_m = c3.number_input("Litros", min_value=0.0, step=1.0)
                 importe_m = c4.number_input("Importe ($)", min_value=0.0, step=1.0)
                 if st.form_submit_button("Agregar registro") and litros_m > 0:
-                    storage.insert_combustible(
+                    insert_combustible(
                         [{"fecha": str(fecha_m), "turno": turno_m, "producto": producto_m, "litros": litros_m, "importe": importe_m}]
                     )
                     st.success("Registro agregado.")
                     st.rerun()
 
         st.divider()
-        df_comb = storage.load_combustible()
+        df_comb = load_combustible()
         st.subheader(f"Registros cargados ({len(df_comb)} en total)")
 
         fc1, fc2, fc3 = st.columns([1, 1, 2])
@@ -269,7 +583,7 @@ with section[0]:
                 pw = st.text_input("Clave", type="password", key="pw_all_comb")
                 if st.button("Confirmar borrado total", key="confirm_all_comb"):
                     if pw == CLAVE_BORRADO:
-                        storage.delete_combustible_ids(df_comb["id"].tolist())
+                        delete_combustible_ids(df_comb["id"].tolist())
                         st.success("Borrado.")
                         st.rerun()
                     else:
@@ -280,7 +594,7 @@ with section[0]:
                     pw2 = st.text_input("Clave", type="password", key="pw_filt_comb")
                     if st.button("Confirmar borrado del filtro", key="confirm_filt_comb"):
                         if pw2 == CLAVE_BORRADO:
-                            storage.delete_combustible_ids(filtered["id"].tolist())
+                            delete_combustible_ids(filtered["id"].tolist())
                             st.success("Borrado.")
                             st.rerun()
                         else:
@@ -297,7 +611,7 @@ with section[0]:
 
     # ---- COMPARATIVO ----
     with comp_tab:
-        df_comb_all = with_year_month(storage.load_combustible())
+        df_comb_all = with_year_month(load_combustible())
         sel_month_label = st.selectbox("Ver mes", ["Todos los meses"] + MESES, key="comb_sel_month")
         sel_month = None if sel_month_label == "Todos los meses" else MESES.index(sel_month_label)
         scoped = df_comb_all if sel_month is None else df_comb_all[df_comb_all["month"] == sel_month]
@@ -423,7 +737,7 @@ with section[1]:
                     rows, err_msg = parse_tienda_htm(f, f.name)
                     if err_msg:
                         msgs.append(err_msg)
-                added, skipped = storage.insert_tienda(rows)
+                added, skipped = insert_tienda(rows)
                 total_added += added
                 total_skipped += skipped
             st.success(f"{total_added} registros nuevos agregados · {total_skipped} ya estaban cargados")
@@ -442,14 +756,14 @@ with section[1]:
                 categoria_t = st.text_input("Categoría / producto", placeholder="Ej: Kiosco, Café, Panadería…")
                 importe_t = st.number_input("Importe ($)", min_value=0.0, step=1.0, key="importe_t")
                 if st.form_submit_button("Agregar registro") and categoria_t and importe_t > 0:
-                    storage.insert_tienda(
+                    insert_tienda(
                         [{"fecha": str(fecha_t), "turno": turno_t, "categoria": categoria_t, "importe": importe_t, "cantidad": 0}]
                     )
                     st.success("Registro agregado.")
                     st.rerun()
 
         st.divider()
-        df_tienda = storage.load_tienda()
+        df_tienda = load_tienda()
         st.subheader(f"Registros cargados ({len(df_tienda)} en total)")
 
         ft1, ft2 = st.columns(2)
@@ -472,7 +786,7 @@ with section[1]:
                 pw_t = st.text_input("Clave", type="password", key="pw_all_tienda")
                 if st.button("Confirmar borrado total", key="confirm_all_tienda"):
                     if pw_t == CLAVE_BORRADO:
-                        storage.delete_tienda_ids(df_tienda["id"].tolist())
+                        delete_tienda_ids(df_tienda["id"].tolist())
                         st.success("Borrado.")
                         st.rerun()
                     else:
@@ -483,7 +797,7 @@ with section[1]:
                     pw2t = st.text_input("Clave", type="password", key="pw_filt_tienda")
                     if st.button("Confirmar borrado del filtro", key="confirm_filt_tienda"):
                         if pw2t == CLAVE_BORRADO:
-                            storage.delete_tienda_ids(filtered_t["id"].tolist())
+                            delete_tienda_ids(filtered_t["id"].tolist())
                             st.success("Borrado.")
                             st.rerun()
                         else:
@@ -502,7 +816,7 @@ with section[1]:
                         st.markdown(f"**{turno}** — {linea}")
 
     with comp_tab_t:
-        df_tienda_all = tienda_with_year_month_grupo(storage.load_tienda())
+        df_tienda_all = tienda_with_year_month_grupo(load_tienda())
         sel_month_t_label = st.selectbox("Ver mes", ["Todos los meses"] + MESES, key="tienda_sel_month")
         sel_month_t = None if sel_month_t_label == "Todos los meses" else MESES.index(sel_month_t_label)
         scoped_t = df_tienda_all if sel_month_t is None else df_tienda_all[df_tienda_all["month"] == sel_month_t]
