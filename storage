@@ -1,0 +1,137 @@
+"""
+Capa de almacenamiento local (SQLite) para Ventas de Combustible y Tienda Full.
+
+IMPORTANTE: en Streamlit Community Cloud el sistema de archivos es efímero.
+Este archivo .db puede borrarse cuando la app se reinicia o "duerme" por
+inactividad. Para persistencia real entre reinicios, ver sync_sheets.py
+(respaldo opcional en Google Sheets).
+"""
+from __future__ import annotations
+
+import sqlite3
+import uuid
+from pathlib import Path
+
+import pandas as pd
+
+DB_PATH = Path(__file__).parent / "estacion_data.db"
+
+
+def get_conn():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS combustible (
+            id TEXT PRIMARY KEY,
+            fecha TEXT NOT NULL,
+            turno TEXT NOT NULL,
+            producto TEXT NOT NULL,
+            litros REAL NOT NULL,
+            importe REAL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tienda (
+            id TEXT PRIMARY KEY,
+            fecha TEXT NOT NULL,
+            turno TEXT NOT NULL,
+            categoria TEXT NOT NULL,
+            importe REAL DEFAULT 0,
+            cantidad REAL DEFAULT 0
+        )
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def load_combustible() -> pd.DataFrame:
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT * FROM combustible", conn)
+    conn.close()
+    return df
+
+
+def load_tienda() -> pd.DataFrame:
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT * FROM tienda", conn)
+    conn.close()
+    return df
+
+
+def insert_combustible(rows: list[dict]) -> tuple[int, int]:
+    """Inserta filas nuevas, ignorando duplicados por (fecha, turno, producto)."""
+    if not rows:
+        return 0, 0
+    existing = load_combustible()
+    existing_keys = (
+        set(zip(existing["fecha"], existing["turno"], existing["producto"]))
+        if not existing.empty
+        else set()
+    )
+    conn = get_conn()
+    cur = conn.cursor()
+    added, skipped, seen = 0, 0, set()
+    for r in rows:
+        key = (r["fecha"], r["turno"], r["producto"])
+        if key in existing_keys or key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        cur.execute(
+            "INSERT INTO combustible (id, fecha, turno, producto, litros, importe) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), r["fecha"], r["turno"], r["producto"], r["litros"], r.get("importe", 0)),
+        )
+        added += 1
+    conn.commit()
+    conn.close()
+    return added, skipped
+
+
+def insert_tienda(rows: list[dict]) -> tuple[int, int]:
+    """Inserta filas nuevas, ignorando duplicados por (fecha, turno, categoria)."""
+    if not rows:
+        return 0, 0
+    existing = load_tienda()
+    existing_keys = (
+        set(zip(existing["fecha"], existing["turno"], existing["categoria"]))
+        if not existing.empty
+        else set()
+    )
+    conn = get_conn()
+    cur = conn.cursor()
+    added, skipped, seen = 0, 0, set()
+    for r in rows:
+        key = (r["fecha"], r["turno"], r["categoria"])
+        if key in existing_keys or key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        cur.execute(
+            "INSERT INTO tienda (id, fecha, turno, categoria, importe, cantidad) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), r["fecha"], r["turno"], r["categoria"], r.get("importe", 0), r.get("cantidad", 0)),
+        )
+        added += 1
+    conn.commit()
+    conn.close()
+    return added, skipped
+
+
+def delete_combustible_ids(ids: list[str]):
+    if not ids:
+        return
+    conn = get_conn()
+    conn.executemany("DELETE FROM combustible WHERE id = ?", [(i,) for i in ids])
+    conn.commit()
+    conn.close()
+
+
+def delete_tienda_ids(ids: list[str]):
+    if not ids:
+        return
+    conn = get_conn()
+    conn.executemany("DELETE FROM tienda WHERE id = ?", [(i,) for i in ids])
+    conn.commit()
+    conn.close()
