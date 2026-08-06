@@ -1,0 +1,199 @@
+"""
+Parsers de archivos de entrada:
+- Planilla cruda del aforador de combustible (.xlsx)
+- CSV genérico de combustible
+- Reporte "Cierre de Caja" de Tienda Full (.htm)
+- CSV genérico de Tienda Full
+"""
+from __future__ import annotations
+
+import re
+
+import pandas as pd
+from openpyxl import load_workbook
+
+# ---------------------------------------------------------------------------
+# Combustible
+# ---------------------------------------------------------------------------
+
+RAW_PRODUCT_MAP = {
+    "NAFTA SUPER": "Nafta Súper",
+    "DIESEL 500": "Diesel 500",
+    "INFINIA NAFTA": "Infinia",
+    "INFINIA DIESEL": "Infinia Diesel",
+}
+RAW_TURNO_MAP = {"1": "Noche", "2": "Mañana", "3": "Tarde"}
+RAW_DATE_RE = re.compile(r"(\d{2})/(\d{2})/(\d{4})\s*\((\d)\)")
+
+PRODUCTOS = ["Nafta Súper", "Infinia", "Diesel 500", "Infinia Diesel"]
+TURNOS = ["Mañana", "Tarde", "Noche"]
+
+
+def parse_combustible_xlsx(file) -> list[dict]:
+    """Lee la planilla cruda del aforador (mismo formato que siempre subís)."""
+    wb = load_workbook(file, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+
+    header_idx = None
+    for i, row in enumerate(rows):
+        if row and any(str(c or "").strip().lower() == "fecha apertura" for c in row):
+            header_idx = i
+            break
+    if header_idx is None:
+        return []
+
+    headers = [str(c or "").strip().upper() for c in rows[header_idx]]
+    col_idx = {key: headers.index(key) for key in RAW_PRODUCT_MAP if key in headers}
+
+    result = []
+    for row in rows[header_idx + 1 :]:
+        if not row or all(c is None for c in row):
+            continue
+        m = RAW_DATE_RE.search(str(row[0] or ""))
+        if not m:
+            continue
+        dd, mm, yyyy, turno_n = m.groups()
+        fecha = f"{yyyy}-{mm}-{dd}"
+        turno = RAW_TURNO_MAP.get(turno_n, "Mañana")
+        for raw_col, producto in RAW_PRODUCT_MAP.items():
+            idx = col_idx.get(raw_col)
+            if idx is None or idx >= len(row):
+                continue
+            try:
+                val = float(row[idx])
+            except (TypeError, ValueError):
+                continue
+            if not val:
+                continue
+            result.append({"fecha": fecha, "turno": turno, "producto": producto, "litros": val, "importe": 0})
+    return result
+
+
+def parse_combustible_csv(file) -> tuple[list[dict], int]:
+    df = pd.read_csv(file)
+    df.columns = [c.strip().lower() for c in df.columns]
+    turnos_validos = {t.lower(): t for t in TURNOS}
+    productos_validos = {p.lower(): p for p in PRODUCTOS}
+    result, errors = [], 0
+    for _, r in df.iterrows():
+        fecha = str(r.get("fecha", "")).strip()
+        turno = turnos_validos.get(str(r.get("turno", "")).strip().lower())
+        producto = productos_validos.get(str(r.get("producto", "")).strip().lower())
+        try:
+            litros = float(r.get("litros"))
+        except (TypeError, ValueError):
+            errors += 1
+            continue
+        try:
+            importe = float(r.get("importe", 0) or 0)
+        except (TypeError, ValueError):
+            importe = 0
+        if not fecha or not turno or not producto:
+            errors += 1
+            continue
+        result.append({"fecha": fecha, "turno": turno, "producto": producto, "litros": litros, "importe": importe})
+    return result, errors
+
+
+# ---------------------------------------------------------------------------
+# Tienda Full
+# ---------------------------------------------------------------------------
+
+TURNOS_TIENDA = ["Mañana", "Tarde"]
+
+
+def normalize_tienda_turno(raw: str):
+    s = re.sub(r"[.\s]", "", str(raw or "").strip().lower())
+    if s == "tm" or s.startswith("mañ") or s.startswith("man"):
+        return "Mañana"
+    if s == "tt" or s.startswith("tar"):
+        return "Tarde"
+    return None
+
+
+def categoria_grupo(categoria: str):
+    c = categoria or ""
+    if re.match(r"^comidas?\s*(envasad|elaborad)", c, re.I):
+        return "comida"
+    if re.match(r"^bebidas?\s*calient", c, re.I):
+        return "cafe"
+    if re.match(r"^bebidas?\s*sin\s*alc", c, re.I):
+        return "bebida"
+    if re.match(r"^cigarrill", c, re.I):
+        return "cigarrillos"
+    return None
+
+
+GRUPOS_TIENDA = ["comida", "cafe", "bebida", "cigarrillos"]
+GRUPO_LABEL = {"comida": "Comida", "cafe": "Café", "bebida": "Bebida", "cigarrillos": "Cigarrillos"}
+
+_RUBRO_RE = re.compile(r"^(\d{2}-\d{3})\s+(\S.*?)\s{2,}(-?[\d.]+,\d+)\s+(-?[\d.]+,\d+)\s*$")
+_FONT_RE = re.compile(r"<FONT[^>]*>([^<]*)</FONT>", re.I)
+
+
+def parse_tienda_htm(file, filename: str) -> tuple[list[dict], str | None]:
+    """Lee el reporte 'Cierre de Caja' (.htm). El turno sale del nombre del
+    archivo (debe terminar en TM o TT) y la fecha se busca dentro del reporte."""
+    raw = file.read()
+    if isinstance(raw, bytes):
+        raw = raw.decode("windows-1252", errors="replace")
+    lines = [m.strip() for m in _FONT_RE.findall(raw)]
+    full_text = "\n".join(lines)
+
+    base = re.sub(r"\.[^.]+$", "", filename).upper()
+    turno = None
+    if re.search(r"(^|[^A-Z])TM$", base):
+        turno = "Mañana"
+    elif re.search(r"(^|[^A-Z])TT$", base):
+        turno = "Tarde"
+    if not turno:
+        return [], f"{filename}: no pude reconocer el turno por el nombre (debe terminar en TM o TT)."
+
+    date_match = re.search(r"(\d{2})/(\d{2})/(\d{4})", full_text)
+    if not date_match:
+        return [], f"{filename}: no encontré una fecha dentro del reporte."
+    dd, mm, yyyy = date_match.groups()
+    fecha = f"{yyyy}-{mm}-{dd}"
+
+    result = []
+    for line in lines:
+        m = _RUBRO_RE.match(line)
+        if not m:
+            continue
+        categoria = m.group(2).strip()
+        try:
+            cantidad = int(m.group(3).split(",")[0].replace(".", ""))
+        except ValueError:
+            cantidad = 0
+        importe = float(m.group(4).replace(".", "").replace(",", "."))
+        result.append(
+            {"fecha": fecha, "turno": turno, "categoria": categoria, "importe": importe, "cantidad": cantidad}
+        )
+    if not result:
+        return [], f'{filename}: no encontré rubros para importar. Revisá que sea un reporte "Cierre de Caja".'
+    return result, None
+
+
+def parse_tienda_csv(file) -> tuple[list[dict], int]:
+    df = pd.read_csv(file)
+    df.columns = [c.strip().lower() for c in df.columns]
+    result, errors = [], 0
+    for _, r in df.iterrows():
+        fecha = str(r.get("fecha", "")).strip()
+        turno = normalize_tienda_turno(r.get("turno", ""))
+        categoria = str(r.get("categoria", r.get("producto", ""))).strip()
+        try:
+            importe = float(r.get("importe"))
+        except (TypeError, ValueError):
+            errors += 1
+            continue
+        try:
+            cantidad = float(r.get("cantidad", 0) or 0)
+        except (TypeError, ValueError):
+            cantidad = 0
+        if not fecha or not turno or not categoria:
+            errors += 1
+            continue
+        result.append({"fecha": fecha, "turno": turno, "categoria": categoria, "importe": importe, "cantidad": cantidad})
+    return result, errors
